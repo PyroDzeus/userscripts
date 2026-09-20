@@ -457,11 +457,11 @@ def sub_format(t):
 _mi_cache = {}
 
 
-def mediainfo(path: Path):
+def mediainfo(path: Path, fresh=False):
     """Normalised mediainfo of one file (cached per path + size + mtime)."""
     st = path.stat()
     ck = (str(path), st.st_size, st.st_mtime)
-    if ck in _mi_cache:
+    if ck in _mi_cache and not fresh:
         return _mi_cache[ck]
     exe = mediainfo_bin()
     if not exe:
@@ -519,7 +519,7 @@ def guid_links(el, kind):
     return out
 
 
-def item_info(key: str):
+def item_info(key: str, fresh=False):
     """Everything the userscript needs to build an NFO for a film or an episode."""
     item = first_item(plex_get(f"/library/metadata/{key}"))
     if item is None:
@@ -551,7 +551,7 @@ def item_info(key: str):
                 continue
             path = Path(remap(part.get("file")))
             try:
-                info = mediainfo(path)
+                info = dict(mediainfo(path, fresh))
                 info["label"] = f"{res}p" if res.isdigit() else res.upper()
                 versions.append(info)
             except Exception as e:
@@ -626,7 +626,7 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/info/(\d+)", path)
         if m:
             try:
-                code, payload = item_info(m.group(1))
+                code, payload = item_info(m.group(1), fresh="fresh=1" in self.path)
             except urllib.error.HTTPError as e:
                 code, payload = (404 if e.code == 404 else 502), {"error": f"plex {e.code}"}
             except Exception as e:
