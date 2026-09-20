@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex Awards 🏆
 // @namespace    plex.awards
-// @version      2.1
+// @version      2.1.2
 // @description  IMDb awards & nominations shown directly on the Plex page — ranked by prestige, summarised in one line, expandable, with a link to the title's /awards/ page. Fully bilingual: in French the data itself is pulled from IMDb's French pages.
 // @match        https://app.plex.tv/*
 // @match        http://*/web/*
@@ -22,6 +22,9 @@
 
 (function () {
   'use strict';
+
+  // One line in the console so you can tell at a glance that the script started.
+  console.info('[Plex Awards] 2.1.2 loaded');
 
   const CARD_ID = 'paw-card';
   const STORE = 'pawSettings';
@@ -221,27 +224,52 @@
     return km ? km[1] : null;
   }
 
-  function getServerInfo() {
-    if (serverInfo) return serverInfo;
-    const candidates = [];
-    document.querySelectorAll('img[src*="X-Plex-Token"]').forEach(i => candidates.push(i.src));
+  const PLEX_TV = /(^|\.)plex\.tv$/i;
+  const badServers = new Set();
+
+  /* Every URL on the page that carries a token, newest first. Anything served
+     by plex.tv is skipped: that's Plex's own metadata service, not your
+     library, and asking it for /library/metadata/… answers nothing. Picking
+     one of those was why the card stayed invisible. */
+  function serverList() {
+    const urls = [];
+    document.querySelectorAll('img[src*="X-Plex-Token"]').forEach(i => urls.push(i.src));
     document.querySelectorAll('[style*="X-Plex-Token"]').forEach(el => {
       const m = (el.getAttribute('style') || '').match(/url\(["']?(.*?X-Plex-Token=.*?)["']?\)/);
-      if (m) candidates.push(m[1]);
+      if (m) urls.push(m[1]);
     });
     try {
       performance.getEntriesByType('resource').forEach(e => {
-        if (e.name.includes('X-Plex-Token') && e.name.includes('/library/')) candidates.push(e.name);
+        if (e.name.includes('X-Plex-Token') && /\/(library|photo|video)\//.test(e.name)) urls.push(e.name);
       });
     } catch (e) {}
-    for (const c of candidates) {
+
+    const out = [], seen = new Set();
+    for (const u of urls.reverse()) {
       try {
-        const u = new URL(c, location.href);
-        const token = u.searchParams.get('X-Plex-Token');
-        if (token) { serverInfo = { origin: u.origin, token }; return serverInfo; }
+        const url = new URL(u, location.href);
+        const token = url.searchParams.get('X-Plex-Token');
+        if (!token || PLEX_TV.test(url.hostname)) continue;
+        const k = url.origin + '|' + token;
+        if (seen.has(k) || badServers.has(k)) continue;
+        seen.add(k);
+        out.push({ origin: url.origin, token });
       } catch (e) {}
     }
-    return null;
+    return out;
+  }
+
+  function getServerInfo() {
+    if (!serverInfo) serverInfo = serverList()[0] || null;
+    return serverInfo;
+  }
+
+  /** The chosen address answered nothing useful: blacklist it and take the next. */
+  function dropServerInfo() {
+    if (!serverInfo) return false;
+    badServers.add(serverInfo.origin + '|' + serverInfo.token);
+    serverInfo = null;
+    return !!getServerInfo();
   }
 
   function fetchXml(srv, path, cb) {
@@ -1291,7 +1319,12 @@
 
     resolveTarget(srv, key, target => {
       if (getRatingKey() !== key) return;
-      if (!target || !target.imdb) { state = null; removeCard(); return; }
+      if (!target) {                       // that address answered nothing: try the next one
+        state = null; removeCard();
+        if (dropServerInfo()) { lastKey = null; update(); }
+        return;
+      }
+      if (!target.imdb) { state = null; removeCard(); return; }
 
       state = Object.assign({}, target, { items: null, failed: false, loading: true });
       render();
