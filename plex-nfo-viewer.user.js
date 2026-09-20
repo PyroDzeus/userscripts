@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex NFO Viewer 📄
 // @namespace    https://github.com/PyroDzeus/userscripts
-// @version      3.4.1
+// @version      3.5.0
 // @description  Reads the .nfo of a film, series, season or episode in Plex Web, like Jellyfin — and builds a release-style NFO from mediainfo, with your own FIGlet ASCII header, when there is none. Nothing is written to disk unless you click Save. Needs plex-nfo-server.py on the Plex machine.
 // @author       Pyro
 // @license      MIT
@@ -103,6 +103,9 @@
     return null;
   }
 
+  /** Sent to the NFO server so it works even when it can't find Plex's token by itself. */
+  const tokenHeader = () => { const t = plexToken(); return t ? { 'X-Plex-Token': t } : {}; };
+
   /* ============================================================
      3. NFO SERVER (optional) — found at runtime, nothing personal hard-coded
        1. at home: derived from the Plex server this page talks to
@@ -160,7 +163,7 @@
     if (nfoCache.has(key)) return nfoCache.get(key);
     const { server, error } = await resolveServer();
     if (!server) return { error };
-    const r = await gmRequest({ method: 'GET', url: `${server}/nfo/${key}` });
+    const r = await gmRequest({ method: 'GET', url: `${server}/nfo/${key}`, headers: tokenHeader() });
     let body = null;
     try { body = JSON.parse(r.text); } catch (_) {}
     if (r.status === 200 && body && body.files && body.files.length) { const res = { files: body.files }; nfoCache.set(key, res); return res; }
@@ -536,7 +539,7 @@
     const { server, error } = await resolveServer();
     if (!server) return { reason: error };
     if (caps.info === false || (!caps.info && !caps.write)) return { reason: 'Update plex-nfo-server.py on the Plex machine to generate NFOs.' };
-    const r = await gmRequest({ method: 'GET', url: `${server}/info/${key}${fresh ? '?fresh=1' : ''}`, timeout: 130000 });
+    const r = await gmRequest({ method: 'GET', url: `${server}/info/${key}${fresh ? '?fresh=1' : ''}`, timeout: 130000, headers: tokenHeader() });
     let body = {};
     try { body = JSON.parse(r.text); } catch (_) {}
     let res;
@@ -825,6 +828,7 @@
       `This page's Plex server: ${plexOrigin() || 'not detected yet'}`,
       `NFO server tried:        ${tried.length ? tried.join(', ') : '—'}`,
       `Connected to:            ${chosen || 'nothing yet'}`,
+      chosen ? `Server version:          ${caps.version || 'old (please update plex-nfo-server.py)'} · MediaInfo ${caps.mediainfoVersion || (caps.mediainfo ? 'installed' : 'missing')}` : '',
       host && !isHomeOrPrivate(host) ? 'Plex is reached through the internet here, so you are probably away from home → step 3.' : '',
     ].filter(Boolean).join('\n');
   }
