@@ -38,7 +38,7 @@ In **⚙ Settings → NFO generator**:
 
 | Setting | What it does |
 |---|---|
-| **Layout** | `1 - Minimalistic` (plain list), `2 - Clean rules` (titles between ═══ rules), `3 - Hash box` (framed with #), `4 - Shaded box` (block frame, fields side by side). Also switchable right above the preview |
+| **Layout** | `1 - MediaInfo` (default: MediaInfo's full report under the file name), `2 - Clean rules` (titles between ═══ rules), `3 - Hash box` (framed with #), `4 - Shaded box` (block frame, fields side by side), `5 - Minimalistic` (plain list). Also switchable right above the preview |
 | **ASCII text** | The big header: `{title}` = film or show title, `{group}` = release group from the file name, or any text. Leave empty for no header |
 | **Font** | 25 [FIGlet](https://patorjk.com/software/taag/) fonts (ANSI Regular, ANSI Shadow, DOS Rebel, Bloody…), or any `.flf` URL. Downloaded once, then cached |
 | **Letter spacing** | *Spaced* (as the font draws it) or *Packed* (like `figlet -k`) |
