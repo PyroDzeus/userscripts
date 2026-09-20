@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex Sidekick 🔗▶️
 // @namespace    pyro.plex.sidekick
-// @version      6.0
+// @version      6.0.2
 // @description  Ton copilote Plex Web : boutons (avec logos) vers 20+ services (TMDB, IMDb, Letterboxd, JustWatch, Blu-ray.com, LDDb, DVDCompare, Criterion…) + lecture directe dans le lecteur de ton choix (IINA, Infuse, mpv, VLC, PotPlayer) avec choix de la version (4K, 1080p…) + épisode suivant + copie de l'URL directe. Colonne réductible, 7 styles dont des icônes compactes (cercles / petits carrés).
 // @author       Pyro
 // @license      MIT
@@ -23,6 +23,9 @@
 
 (function () {
   'use strict';
+
+  // One line in the console so you can tell at a glance that the script started.
+  console.info('[Plex Sidekick] 6.0.2 loaded');
 
   const COL_ID = 'psk-col';
   const PANEL_ID = 'psk-panel';
@@ -276,27 +279,52 @@
     return km ? km[1] : null;
   }
 
-  function getServerInfo() {
-    if (serverInfo) return serverInfo;
-    const candidates = [];
-    document.querySelectorAll('img[src*="X-Plex-Token"]').forEach(i => candidates.push(i.src));
+  const PLEX_TV = /(^|\.)plex\.tv$/i;
+  const badServers = new Set();
+
+  /* Every URL on the page that carries a token, newest first. Anything served
+     by plex.tv is skipped: that's Plex's own metadata service, not your
+     library, and asking it for /library/metadata/… answers nothing. Picking
+     one of those was why the column stayed invisible. */
+  function serverList() {
+    const urls = [];
+    document.querySelectorAll('img[src*="X-Plex-Token"]').forEach(i => urls.push(i.src));
     document.querySelectorAll('[style*="X-Plex-Token"]').forEach(el => {
       const m = (el.getAttribute('style') || '').match(/url\(["']?(.*?X-Plex-Token=.*?)["']?\)/);
-      if (m) candidates.push(m[1]);
+      if (m) urls.push(m[1]);
     });
     try {
       performance.getEntriesByType('resource').forEach(e => {
-        if (e.name.includes('X-Plex-Token') && e.name.includes('/library/')) candidates.push(e.name);
+        if (e.name.includes('X-Plex-Token') && /\/(library|photo|video)\//.test(e.name)) urls.push(e.name);
       });
     } catch (e) {}
-    for (const c of candidates) {
+
+    const out = [], seen = new Set();
+    for (const u of urls.reverse()) {
       try {
-        const u = new URL(c, location.href);
-        const token = u.searchParams.get('X-Plex-Token');
-        if (token) { serverInfo = { origin: u.origin, token }; return serverInfo; }
+        const url = new URL(u, location.href);
+        const token = url.searchParams.get('X-Plex-Token');
+        if (!token || PLEX_TV.test(url.hostname)) continue;
+        const k = url.origin + '|' + token;
+        if (seen.has(k) || badServers.has(k)) continue;
+        seen.add(k);
+        out.push({ origin: url.origin, token });
       } catch (e) {}
     }
-    return null;
+    return out;
+  }
+
+  function getServerInfo() {
+    if (!serverInfo) serverInfo = serverList()[0] || null;
+    return serverInfo;
+  }
+
+  /** The chosen address answered nothing useful: blacklist it and take the next. */
+  function dropServerInfo() {
+    if (!serverInfo) return false;
+    badServers.add(serverInfo.origin + '|' + serverInfo.token);
+    serverInfo = null;
+    return !!getServerInfo();
   }
 
   /* ============================================================
@@ -1472,9 +1500,15 @@ disown</pre>
     // resolve() peut rappeler deux fois pour un épisode :
     // d'abord les métadonnées, puis l'épisode suivant une fois trouvé.
     resolve(srv, key, data => {
-      cache[key] = data;
       if (getRatingKey() !== key) return;
-      data ? render(data) : removeContainer();
+      if (!data) {                         // that address answered nothing: try the next one
+        removeContainer();
+        if (dropServerInfo()) { delete cache[key]; lastKey = null; update(); }
+        else cache[key] = null;
+        return;
+      }
+      cache[key] = data;
+      render(data);
     });
   }
 
