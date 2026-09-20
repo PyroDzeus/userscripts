@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex NFO Viewer 📄
 // @namespace    https://github.com/PyroDzeus/userscripts
-// @version      3.4.0
+// @version      3.4.1
 // @description  Reads the .nfo of a film, series, season or episode in Plex Web, like Jellyfin — and builds a release-style NFO from mediainfo, with your own FIGlet ASCII header, when there is none. Nothing is written to disk unless you click Save. Needs plex-nfo-server.py on the Plex machine.
 // @author       Pyro
 // @license      MIT
@@ -554,7 +554,10 @@
       .replace(/\{title\}/gi, info.type === 'episode' ? info.show : info.title);
     const layout = LAYOUTS[settings.layout] || LAYOUTS[DEFAULTS.layout];
     const header = text.trim() ? await asciiHeader(text, layout.width) : { lines: [] };
-    return { text: renderNfo(model, header), file: model.file, release: model.release, warn: header.warn };
+    const outdated = layout === LAYOUTS.mediainfo && !model.report
+      ? 'Your plex-nfo-server.py is too old for "1 - MediaInfo" (shown as "5 - Minimalistic" meanwhile): update it on the Plex machine, restart it, then click ↻ Re-run mediainfo.'
+      : null;
+    return { text: renderNfo(model, header), file: model.file, release: model.release, warn: outdated || header.warn };
   }
 
   /* ============================================================
