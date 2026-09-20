@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex NFO Viewer 📄
 // @namespace    https://github.com/PyroDzeus/userscripts
-// @version      3.3.0
+// @version      3.4.0
 // @description  Reads the .nfo of a film, series, season or episode in Plex Web, like Jellyfin — and builds a release-style NFO from mediainfo, with your own FIGlet ASCII header, when there is none. Nothing is written to disk unless you click Save. Needs plex-nfo-server.py on the Plex machine.
 // @author       Pyro
 // @license      MIT
@@ -49,7 +49,7 @@
 
   /* ---------- settings ---------- */
   const DEFAULTS = {
-    layout: 'rules',          // see LAYOUTS
+    layout: 'mediainfo',      // see LAYOUTS
     asciiText: '{title}',     // {title} = film / show title, {group} = release group, or any text
     font: 'ANSI Regular',
     fontUrl: '',              // any .flf URL, overrides the list
@@ -63,7 +63,8 @@
   if (!stored.v) {            // settings saved by 3.0/3.1: the texts were pre-filled back then, start clean
     for (const k of ['subtitle', 'footer', 'asciiText', 'sceneLabels']) delete stored[k];
   }
-  let settings = Object.assign({}, DEFAULTS, stored, { v: 2 });
+  if ((stored.v || 0) < 3 && stored.layout === 'rules') stored.layout = 'mediainfo';   // old default -> new default
+  let settings = Object.assign({}, DEFAULTS, stored, { v: 3 });
   const saveSettings = () => store.set('pnfoSettings', settings);
 
   /* ============================================================
@@ -327,7 +328,7 @@
   function buildModel(info, v) {
     const vid = v.video || {};
     return {
-      file: v.file, release: v.release,
+      file: v.file, release: v.release, report: v.report || '',
       group: (v.release.match(/-([A-Za-z0-9]+)$/) || [])[1] || '',
       titleLines: info.type === 'episode'
         ? [info.show, `S${two(info.season)}E${two(info.episode)} : ${info.title}`]
@@ -420,13 +421,13 @@
   };
 
   const LAYOUTS = {
-    /* 1 — mediainfo-like list, no frame */
-    minimal: { name: '1 - Minimalistic', width: 80, render(m, header) {
+    /* 1 — mediainfo's own report under the file name, like most NFOs do it */
+    mediainfo: { name: '1 - MediaInfo', width: 80, render(m, header) {
+      if (!m.report) return LAYOUTS.minimal.render(m, header);   // server too old to send the report
       const W = 80, out = intro(header, W);
-      out.push(m.release, '');
-      m.titleLines.forEach(t => out.push(t));
-      for (const [title, pairs] of sections(m)) out.push('', label(title, true), ...kv(pairs, W, 20, 0));
-      if (m.links.length) out.push('', label('Links', true), ...m.links.map(([, u]) => u));
+      const bar = '='.repeat(Math.max(W, len(m.file)));
+      out.push(bar, m.file, bar, ...m.report.split('\n'));
+      if (m.links.length) out.push('', 'Links', ...m.links.map(([l, u]) => `${padR(label(l), 41)}: ${u}`));
       if (notes().length) out.push('', ...notes().flatMap(n => wrap(n, W)));
       return out;
     } },
@@ -506,6 +507,17 @@
       if (m.links.length) out.push(...section('Links', rows(m.links)));
       if (settings.greetz.trim()) out.push(...section('Notes', [row(''), ...wrap(settings.greetz.trim(), INNER).map(x => row(center(x, INNER))), row('')]));
       out.push(`█${top}█`, bar(settings.footer.trim(), 'end'), `▀█${low.slice(2)}█▀`);
+      return out;
+    } },
+
+    /* 5 — plain list, no frame */
+    minimal: { name: '5 - Minimalistic', width: 80, render(m, header) {
+      const W = 80, out = intro(header, W);
+      out.push(m.release, '');
+      m.titleLines.forEach(t => out.push(t));
+      for (const [title, pairs] of sections(m)) out.push('', label(title, true), ...kv(pairs, W, 20, 0));
+      if (m.links.length) out.push('', label('Links', true), ...m.links.map(([, u]) => u));
+      if (notes().length) out.push('', ...notes().flatMap(n => wrap(n, W)));
       return out;
     } },
   };
@@ -730,7 +742,7 @@
               Keep that window open. It should print <code>plex-nfo-server on http://0.0.0.0:${NFO_PORT}</code>.</li>
             <li><b>Check it answers</b>, on that same machine:<br>
               <span class="cmd"><code>curl http://127.0.0.1:${NFO_PORT}/ping</code><button type="button" data-copy="curl http://127.0.0.1:${NFO_PORT}/ping">Copy</button></span><br>
-              You should get <code>{"ok": true, …}</code>. At home, that's all: this page finds it by itself, leave the field above empty.</li>
+              You should get <code>{"ok": true, …}</code>. At home, nothing else to do: this page finds it by itself, leave the field above empty.</li>
             <li><b>Away from home?</b> Install <a href="https://tailscale.com/download" target="_blank" rel="noopener" style="color:#ccc">Tailscale</a>
               on both machines and sign in with the same account. Then find the Plex machine's Tailscale address (it starts with <code>100.</code>):
               click the Tailscale icon in its menu bar → <i>This device</i>, or run there:<br>
@@ -879,7 +891,7 @@
 
   /* ---------- showing tabs ---------- */
   function fitFont(text) {
-    const cols = Math.max(40, ...text.split('\n').map(l => [...l].length));
+    const cols = Math.min(120, Math.max(40, ...text.split('\n').map(l => [...l].length)));
     const avail = window.innerWidth * 0.94 - 56;
     pre.style.fontSize = Math.max(7, Math.min(15, avail / (cols * 0.602))).toFixed(2) + 'px';
   }
