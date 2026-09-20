@@ -50,7 +50,7 @@
   /* ---------- settings ---------- */
   const DEFAULTS = {
     layout: 'rules',          // see LAYOUTS
-    asciiText: '{title}',     // {title} = film / show title, {group} = release group, or any text
+    asciiText: '{group}',     // {title} = film / show title, {group} = release group, or any text
     font: 'ANSI Regular',
     fontUrl: '',              // any .flf URL, overrides the list
     spacing: 'full',          // 'full' = letters spaced like the font draws them, 'fitted' = packed
