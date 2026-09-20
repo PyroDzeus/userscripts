@@ -4,17 +4,18 @@ Shows the `.nfo` of a film, series, season or episode directly in Plex Web, like
 
 > ⚠️ Experimental and vibe-coded: use at your own risk!
 
-Plex Web can't read files sitting next to your videos, so the script works with a small companion server, [`plex-nfo-server.py`](https://raw.githubusercontent.com/PyroDzeus/userscripts/main/plex-nfo-server.py). It runs on the machine that runs Plex and needs Python 3, plus [MediaInfo](https://mediaarea.net/en/MediaInfo) for generating NFOs (`brew install media-info` on macOS, `apt install mediainfo` on Debian/Ubuntu).
+Plex Web can't read files sitting next to your videos, so the script works with a small companion server, [`plex-nfo-server.py`](https://raw.githubusercontent.com/PyroDzeus/userscripts/main/plex-nfo-server.py). It runs on the machine that runs Plex and needs Python 3, plus [MediaInfo](https://mediaarea.net/en/MediaInfo) for generating NFOs (the server offers to install it).
 
 ## Setup
 
-1. Download `plex-nfo-server.py` to the Plex machine and start it:
-   ```bash
-   python3 plex-nfo-server.py
-   ```
-   It listens on port `8764` and finds your Plex token by itself on macOS. On other systems, start it with `PLEX_TOKEN=your-token python3 plex-nfo-server.py`.
-2. [Install the userscript](https://raw.githubusercontent.com/PyroDzeus/userscripts/main/plex-nfo-viewer.user.js) with [Violentmonkey](https://violentmonkey.github.io/).
-3. Open a film, series, season or episode: an **NFO** button appears next to Plex's **⋯** button.
+1. On the computer that runs Plex, install [Python 3](https://www.python.org/downloads/) if it isn't there yet (on Windows, tick **Add python.exe to PATH** in the installer).
+2. Download [`plex-nfo-server.py`](https://raw.githubusercontent.com/PyroDzeus/userscripts/main/plex-nfo-server.py) on that computer and start it:
+   - **Windows:** double-click it (or run `py plex-nfo-server.py`). If Windows asks whether Python may use the network, click **Allow**.
+   - **macOS / Linux:** `python3 plex-nfo-server.py`
+
+   Nothing to configure: it finds the Plex token by itself (or uses the one of whoever is signed in to Plex in the browser), and if MediaInfo is missing it offers to install it. Leave its window open.
+3. [Install the userscript](https://raw.githubusercontent.com/PyroDzeus/userscripts/main/plex-nfo-viewer.user.js) with [Violentmonkey](https://violentmonkey.github.io/).
+4. Open a film, series, season or episode: an **NFO** button appears next to Plex's **⋯** button.
 
 | Button | Meaning |
 |---|---|
@@ -80,6 +81,7 @@ When the button is red (**NFO ⚠**), click it: the settings and a **❓ Setup h
 | Works on the Plex machine, not from another computer at home | The Plex machine's firewall blocks it: allow incoming connections for Python (macOS: System Settings › Network › Firewall › Options) |
 | Works at home, not away | Set the Tailscale address (see above) |
 | Check the server itself | On the Plex machine: `curl http://127.0.0.1:8764/ping` must answer `{"ok": true, …}` |
-| Button stays plain on films / episodes without NFO | MediaInfo is missing on the Plex machine: `brew install media-info` (macOS) or `sudo apt install mediainfo` (Linux), then restart the server |
+| Button stays plain on films / episodes without NFO | MediaInfo is missing on the Plex machine: restart the server and accept the install, or install the MediaInfo **CLI** from mediaarea.net |
+| The MediaInfo layout shows less than `mediainfo` in a terminal | The Plex machine's MediaInfo is older: update it (`brew upgrade media-info` on macOS). **⚙ Settings → Setup help** shows the server's and MediaInfo's versions |
 
 [← Back to all scripts](README.md)
