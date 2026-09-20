@@ -25,9 +25,9 @@ Plex Web can't read files sitting next to your videos, so the script works with 
 
 ## Generating an NFO
 
-For films and episodes, the **✨ Generate** tab shows a classic 81-column release NFO. The server runs `mediainfo` on the video file and the script lays out the result: size, source (WEB-DL, Blu-ray, Remux… and the streaming service), video (codec, bitrate, resolution, HDR10 / HDR10+ / Dolby Vision profile), every audio track (language, VFF/VFQ, audio description, Atmos, DTS-HD MA…), every subtitle (forced, SDH, line count), and TMDB / TVDB / IMDb links from Plex.
+For films and episodes, the **✨ Generate** tab shows a release NFO in the layout of your choice. The server runs `mediainfo` on the video file and the script lays out the result: size, source (WEB-DL, Blu-ray, Remux… and the streaming service), video (codec, bitrate, resolution, HDR10 / HDR10+ / Dolby Vision profile), every audio track (language, VFF/VFQ, audio description, Atmos, DTS-HD MA…), every subtitle (forced, SDH, line count), and TMDB / TVDB / IMDb links from Plex.
 
-When an NFO already exists, the ✨ tab is still there: mediainfo only runs if you open it.
+When an NFO already exists (made by hand or earlier), the tab becomes **✨ Regenerate**: mediainfo only runs if you open it, and **♻ Replace the local .nfo…** overwrites the file only after you confirm. **↻ Re-run mediainfo** reads the video again if it changed.
 
 - **⬇ Download .nfo** saves it to your computer.
 - **💾 Create the local .nfo file…** writes `<video name>.nfo` beside the video, **only after you confirm**, and asks again before replacing an existing NFO. Plex checks your token first: only someone who can see the item in Plex can create its NFO.
@@ -38,11 +38,12 @@ In **⚙ Settings → NFO generator**:
 
 | Setting | What it does |
 |---|---|
-| **ASCII text** | The big header. `{group}` = release group, `{title}` = film or show title, or any text |
+| **Layout** | `1 - Minimalistic` (plain list), `2 - Clean rules` (titles between ═══ rules), `3 - Hash box` (framed with #), `4 - Shaded box` (block frame, fields side by side). Also switchable right above the preview |
+| **ASCII text** | The big header: `{title}` = film or show title, `{group}` = release group from the file name, or any text. Leave empty for no header |
 | **Font** | 25 [FIGlet](https://patorjk.com/software/taag/) fonts (ANSI Regular, ANSI Shadow, DOS Rebel, Bloody…), or any `.flf` URL. Downloaded once, then cached |
 | **Letter spacing** | *Spaced* (as the font draws it) or *Packed* (like `figlet -k`) |
-| **Line under it / Greetz / Footer** | The "Presents" line, an optional GREETZ section and the closing banner |
-| **Scene-style labels** | `RESOLUTiON`, `AUDiO`… or plain labels |
+| **Line under it**, **Notes / greetz**, **Footer** | Optional, empty by default |
+| **Scene-style labels** | `RESOLUTiON`, `AUDiO`… instead of plain labels |
 
 A live preview shows the header as you type. If the text is too wide for 81 columns it is split over several lines, and if a font can't be downloaded the header falls back to plain text.
 
@@ -61,11 +62,24 @@ Scene NFOs (CP437 box art) and Kodi XML NFOs are both supported. If a film or ep
 
 ## Away from home
 
-At home the server is found automatically from your Plex connection. Away from home it isn't reachable through Plex's public address, and it shouldn't be opened to the internet. Use [Tailscale](https://tailscale.com/) instead:
+At home the server is found automatically from your Plex connection: leave the address field empty. Away from home, Plex is reached through the internet, but the NFO server isn't (and shouldn't be opened to it). Use [Tailscale](https://tailscale.com/download) instead:
 
-1. Run Tailscale on both the Plex machine and your computer.
-2. In the NFO window, click **⚙ Server** and enter `http://<Plex machine's Tailscale IP>:8764`. You can get that IP with `tailscale ip -4`.
+1. Install Tailscale on the Plex machine and on your computer, signed in with the same account.
+2. Find the Plex machine's Tailscale address, which starts with `100.`: click the Tailscale icon in its menu bar → *This device*, or run `tailscale ip -4` on it.
+3. In the NFO window, click **⚙ Settings**, type that address (just `100.x.y.z` is enough, it becomes `http://100.x.y.z:8764`), click **Test**, then **Save & retry**.
 
 The address is saved in your browser only. The script contains no IP, hostname or other personal settings.
+
+## Troubleshooting
+
+When the button is red (**NFO ⚠**), click it: the settings and a **❓ Setup help** panel open by themselves, with copyable commands and what the script tried.
+
+| Symptom | Fix |
+|---|---|
+| *NFO server not reachable (tried http://127.0.0.1:8764)* while Plex runs on this computer | The server isn't running: start `python3 plex-nfo-server.py` and keep the window open |
+| Works on the Plex machine, not from another computer at home | The Plex machine's firewall blocks it: allow incoming connections for Python (macOS: System Settings › Network › Firewall › Options) |
+| Works at home, not away | Set the Tailscale address (see above) |
+| Check the server itself | On the Plex machine: `curl http://127.0.0.1:8764/ping` must answer `{"ok": true, …}` |
+| Button stays plain on films / episodes without NFO | MediaInfo is missing on the Plex machine: `brew install media-info` (macOS) or `sudo apt install mediainfo` (Linux), then restart the server |
 
 [← Back to all scripts](README.md)
