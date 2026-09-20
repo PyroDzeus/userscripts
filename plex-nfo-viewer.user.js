@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex NFO Viewer 📄
 // @namespace    https://github.com/PyroDzeus/userscripts
-// @version      3.2.0
+// @version      3.3.0
 // @description  Reads the .nfo of a film, series, season or episode in Plex Web, like Jellyfin — and builds a release-style NFO from mediainfo, with your own FIGlet ASCII header, when there is none. Nothing is written to disk unless you click Save. Needs plex-nfo-server.py on the Plex machine.
 // @author       Pyro
 // @license      MIT
@@ -50,7 +50,7 @@
   /* ---------- settings ---------- */
   const DEFAULTS = {
     layout: 'rules',          // see LAYOUTS
-    asciiText: '{group}',     // {title} = film / show title, {group} = release group, or any text
+    asciiText: '{title}',     // {title} = film / show title, {group} = release group, or any text
     font: 'ANSI Regular',
     fontUrl: '',              // any .flf URL, overrides the list
     spacing: 'full',          // 'full' = letters spaced like the font draws them, 'fitted' = packed
@@ -151,7 +151,7 @@
       return { error: "You're away from home: the NFO server isn't reachable through Plex's public address. Set the Plex machine's Tailscale address in ⚙ Settings." };
     }
     if (!list.length) return { error: 'Plex server not detected yet — reload the page, or set the server address in ⚙ Settings.' };
-    return { error: `NFO server not reachable (tried ${list.join(', ')}). Is plex-nfo-server.py running on the Plex machine?` + (savedServers().length ? '' : ' Away from home? Set its Tailscale address in ⚙ Settings.') };
+    return { error: `NFO server not reachable (tried ${list.join(', ')}). See ❓ Setup help in ⚙ Settings.` };
   }
 
   const nfoCache = new Map(); // ratingKey -> {files} | {none}
@@ -597,6 +597,19 @@
       border-radius:4px;padding:6px 8px;font:12px "SF Mono",Menlo,monospace}
     #pnfo-settings input[type=checkbox]{accent-color:#f0c419}
     #pnfo-settings .hint{font-size:11.5px;color:#888;margin-top:6px}
+    #pnfo-help{margin-top:10px;border:1px solid #2a2a2a;border-radius:6px;background:#0c0c0c}
+    #pnfo-help summary{cursor:pointer;padding:8px 10px;color:#f0c419;font-weight:600;font-size:12.5px;list-style:none}
+    #pnfo-help summary::-webkit-details-marker{display:none}
+    #pnfo-help[open] summary{border-bottom:1px solid #1f1f1f}
+    #pnfo-help ol{margin:8px 0 10px;padding-left:26px;font-size:12.5px;color:#bbb}
+    #pnfo-help li{margin:7px 0}
+    #pnfo-help b{color:#eee}
+    #pnfo-help .cmd{display:inline-flex;align-items:center;gap:6px;margin:4px 0 0;background:#000;border:1px solid #2a2a2a;
+      border-radius:4px;padding:3px 4px 3px 8px;font:12px "SF Mono",Menlo,monospace;color:#e6e6e6}
+    #pnfo-help .cmd button{background:#1b1b1b;border:1px solid #333;color:#bbb;border-radius:3px;font:11px -apple-system,sans-serif;
+      padding:2px 6px;cursor:pointer}
+    #pnfo-help .cmd button:hover{color:#fff;border-color:#555}
+    #pnfo-help .diag{margin:0 10px 10px;padding:7px 9px;background:#111;border-radius:4px;font:11.5px "SF Mono",Menlo,monospace;color:#999;white-space:pre-wrap}
     #pnfo-settings code{color:#ccc}
     #pnfo-preview{margin:8px 0 0;padding:8px;background:#000;border:1px solid #222;border-radius:4px;color:#d6d6d6;
       font:9px/1.1 "SF Mono",Menlo,monospace;white-space:pre;overflow:auto;max-height:160px}
@@ -707,8 +720,29 @@
           <button class="pnfo-act primary" id="pnfo-save">Save &amp; retry</button>
           <button class="pnfo-act" id="pnfo-test">Test</button>
         </div>
-        <div class="hint">At home the server is found automatically from your Plex connection. The address above is used when
-          that fails (away from home), e.g. the Plex machine's Tailscale IP from <code>tailscale ip -4</code>. Saved in this browser only.</div>
+        <div class="hint">At home the server is found automatically from your Plex connection. The address above is only for when
+          that fails (away from home). You can type just the IP: <code>100.x.y.z</code> becomes <code>http://100.x.y.z:${NFO_PORT}</code>. Saved in this browser only.</div>
+        <details id="pnfo-help">
+          <summary>❓ Can't connect? Setup help</summary>
+          <ol>
+            <li><b>Start the server on the machine that runs Plex</b> (not on this computer, unless Plex runs here). In a terminal, in the folder where you saved it:<br>
+              <span class="cmd"><code>python3 plex-nfo-server.py</code><button type="button" data-copy="python3 plex-nfo-server.py">Copy</button></span><br>
+              Keep that window open. It should print <code>plex-nfo-server on http://0.0.0.0:${NFO_PORT}</code>.</li>
+            <li><b>Check it answers</b>, on that same machine:<br>
+              <span class="cmd"><code>curl http://127.0.0.1:${NFO_PORT}/ping</code><button type="button" data-copy="curl http://127.0.0.1:${NFO_PORT}/ping">Copy</button></span><br>
+              You should get <code>{"ok": true, …}</code>. At home, that's all: this page finds it by itself, leave the field above empty.</li>
+            <li><b>Away from home?</b> Install <a href="https://tailscale.com/download" target="_blank" rel="noopener" style="color:#ccc">Tailscale</a>
+              on both machines and sign in with the same account. Then find the Plex machine's Tailscale address (it starts with <code>100.</code>):
+              click the Tailscale icon in its menu bar → <i>This device</i>, or run there:<br>
+              <span class="cmd"><code>tailscale ip -4</code><button type="button" data-copy="tailscale ip -4">Copy</button></span><br>
+              Type that address in the field above, click <b>Test</b>, then <b>Save &amp; retry</b>.</li>
+            <li><b>Still “not reachable” from another computer?</b> The Plex machine's firewall may block it: allow incoming connections for
+              <b>Python</b> (macOS: System Settings › Network › Firewall › Options).</li>
+            <li><b>To generate NFOs</b>, the Plex machine also needs MediaInfo:<br>
+              <span class="cmd"><code>brew install media-info</code><button type="button" data-copy="brew install media-info">Copy</button></span> <span style="color:#777">(macOS) · <code>sudo apt install mediainfo</code> (Linux)</span></li>
+          </ol>
+          <div class="diag" id="pnfo-diag"></div>
+        </details>
 
         <h4>NFO generator</h4>
         <div class="row"><label class="k" for="pnfo-g-layout">Layout</label><select id="pnfo-g-layout" data-k="layout">${Object.entries(LAYOUTS).map(([k, l]) => `<option value="${k}">${esc(l.name)}</option>`).join('')}</select></div>
@@ -754,20 +788,49 @@
   gear.addEventListener('click', () => toggleSettings(settingsBox.hidden));
 
   /* ---------- settings panel ---------- */
+  /** "100.64.1.2" -> "http://100.64.1.2:8764" (several allowed, comma-separated) */
+  function normalizeServers(v) {
+    return String(v || '').split(/[\s,]+/).filter(Boolean).map(x => {
+      x = x.trim().replace(/\/+$/, '');
+      if (!/^https?:\/\//i.test(x)) x = 'http://' + x;
+      try { const u = new URL(x); if (!u.port) u.port = String(NFO_PORT); return u.origin; } catch (_) { return x; }
+    }).join(', ');
+  }
+
+  $('#pnfo-help').addEventListener('click', e => {
+    const b = e.target.closest('button[data-copy]');
+    if (!b) return;
+    navigator.clipboard.writeText(b.dataset.copy).then(() => { b.textContent = 'Copied'; setTimeout(() => { b.textContent = 'Copy'; }, 1200); });
+  });
+
+  function fillDiag() {
+    const host = plexHost();
+    const tried = candidates();
+    $('#pnfo-diag').textContent = [
+      `This page's Plex server: ${plexOrigin() || 'not detected yet'}`,
+      `NFO server tried:        ${tried.length ? tried.join(', ') : '—'}`,
+      `Connected to:            ${chosen || 'nothing yet'}`,
+      host && !isHomeOrPrivate(host) ? 'Plex is reached through the internet here, so you are probably away from home → step 3.' : '',
+    ].filter(Boolean).join('\n');
+  }
+
   $('#pnfo-save').addEventListener('click', async () => {
-    store.set('nfoServer', $('#pnfo-remote').value.trim());
+    $('#pnfo-remote').value = normalizeServers($('#pnfo-remote').value);
+    store.set('nfoServer', $('#pnfo-remote').value);
     chosen = null; nfoCache.clear();
     await refresh(true);
   });
   $('#pnfo-test').addEventListener('click', async () => {
     chosen = null;
     const saved = store.get('nfoServer', '');
-    store.set('nfoServer', $('#pnfo-remote').value.trim());   // test what's typed…
+    $('#pnfo-remote').value = normalizeServers($('#pnfo-remote').value);
+    store.set('nfoServer', $('#pnfo-remote').value);          // test what's typed…
     setStatus('testing…');
     const r = await resolveServer();
     store.set('nfoServer', saved);                             // …without saving it
     chosen = null;
-    setStatus(r.server ? `✅ reachable: ${r.server}${caps.info ? (caps.mediainfo === false ? ' — ⚠ mediainfo not installed there' : '') : ' (old version: reading only)'}` : `❌ ${r.error}`);
+    setStatus(r.server ? `✅ reachable: ${r.server}${caps.info ? (caps.mediainfo === false ? ' — ⚠ mediainfo not installed there (step 5)' : '') : ' (old version: reading only)'}` : `❌ ${r.error}`);
+    fillDiag();
   });
 
   let previewTimer = null;
@@ -808,7 +871,10 @@
   function toggleSettings(on) {
     settingsBox.hidden = !on;
     gear.setAttribute('aria-pressed', String(on));
-    if (on) { fillSettings(); setStatus(''); updatePreview(); }
+    if (on) {
+      fillSettings(); setStatus(''); updatePreview(); fillDiag();
+      if (state.kind === 'error') $('#pnfo-help').open = true;   // can't connect: show the steps right away
+    }
   }
 
   /* ---------- showing tabs ---------- */
