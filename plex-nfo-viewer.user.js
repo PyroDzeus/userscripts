@@ -1077,8 +1077,6 @@
   }
   const onRoute = () => refresh(false);
 
-  GM_registerMenuCommand('NFO settings…', () => { open(); toggleSettings(true); });
-
   window.addEventListener('hashchange', onRoute);
   let lastHref = location.href;
   setInterval(() => {
