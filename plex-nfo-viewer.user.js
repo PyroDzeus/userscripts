@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex NFO Viewer 📄
 // @namespace    https://github.com/PyroDzeus/userscripts
-// @version      3.1.0
+// @version      3.2.0
 // @description  Reads the .nfo of a film, series, season or episode in Plex Web, like Jellyfin — and builds a release-style NFO from mediainfo, with your own FIGlet ASCII header, when there is none. Nothing is written to disk unless you click Save. Needs plex-nfo-server.py on the Plex machine.
 // @author       Pyro
 // @license      MIT
@@ -49,16 +49,21 @@
 
   /* ---------- settings ---------- */
   const DEFAULTS = {
-    asciiText: '{group}',     // {group} = release group, {title} = film / show title
+    layout: 'rules',          // see LAYOUTS
+    asciiText: '{title}',     // {title} = film / show title, {group} = release group, or any text
     font: 'ANSI Regular',
     fontUrl: '',              // any .flf URL, overrides the list
     spacing: 'full',          // 'full' = letters spaced like the font draws them, 'fitted' = packed
-    subtitle: 'Presents',
-    greetz: '',
-    footer: "THAT'S ALL FOLKS!",
-    sceneLabels: true,        // RESOLUTiON-style labels
+    subtitle: '',             // optional line under the header
+    greetz: '',               // optional notes / greetings section
+    footer: '',               // optional closing line
+    sceneLabels: false,       // RESOLUTiON-style labels
   };
-  let settings = Object.assign({}, DEFAULTS, store.get('pnfoSettings', {}));
+  const stored = store.get('pnfoSettings', {});
+  if (!stored.v) {            // settings saved by 3.0/3.1: the texts were pre-filled back then, start clean
+    for (const k of ['subtitle', 'footer', 'asciiText', 'sceneLabels']) delete stored[k];
+  }
+  let settings = Object.assign({}, DEFAULTS, stored, { v: 2 });
   const saveSettings = () => store.set('pnfoSettings', settings);
 
   /* ============================================================
@@ -249,12 +254,12 @@
   }
 
   /** ASCII header lines (centred), falling back to plain text if too wide or no font. */
-  async function asciiHeader(text) {
+  async function asciiHeader(text, width = WIDTH) {
     text = (text || '').trim();
     if (!text) return { lines: [] };
     let font = null, warn = null;
     try { font = await loadFont(); } catch (e) { warn = e.message; }
-    const fits = ls => ls.every(l => [...l].length <= WIDTH);
+    const fits = ls => ls.every(l => [...l].length <= width);
     let lines = null;
     if (font) {
       for (const mode of [settings.spacing, 'fitted']) {
@@ -272,7 +277,7 @@
     while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
     while (lines.length && !lines[0].trim()) lines.shift();
     const w = Math.max(...lines.map(l => [...l].length));
-    const pad = ' '.repeat(Math.max(0, Math.floor((WIDTH - w) / 2)));
+    const pad = ' '.repeat(Math.max(0, Math.floor((width - w) / 2)));
     return { lines: lines.map(l => (pad + l).replace(/\s+$/, '')), warn };
   }
 
@@ -324,15 +329,13 @@
     return {
       file: v.file, release: v.release,
       group: (v.release.match(/-([A-Za-z0-9]+)$/) || [])[1] || '',
+      titleLines: info.type === 'episode'
+        ? [info.show, `S${two(info.season)}E${two(info.episode)} : ${info.title}`]
+        : [`${info.title}${info.year ? ` (${info.year})` : ''}`],
       rows: [
         ['RELEASE SIZE', gib(v.size), 'NFO DATE', new Date().toISOString().slice(0, 10)],
         ['SOURCE', sourceOf(v.release)],
-        ...(info.type === 'episode'
-          ? [['SHOW', info.show],
-             ['EPISODE', `S${two(info.season)}E${two(info.episode)} - ${info.title}`],
-             ['AIR DATE', info.airDate, 'RUNTIME', duration(v.duration)]]
-          : [['TITLE', `${info.title}${info.year ? ` (${info.year})` : ''}`],
-             ['RELEASED', info.airDate, 'RUNTIME', duration(v.duration)]]),
+        [info.type === 'episode' ? 'AIR DATE' : 'RELEASED', info.airDate, 'RUNTIME', duration(v.duration)],
       ],
       video: [
         ['CODEC', vid.codec, 'BITRATE', rate(vid.bitrate)],
@@ -356,12 +359,14 @@
   }
 
   /* ============================================================
-     6. NFO LAYOUT — 81-column box
+     6. NFO LAYOUTS
+     Every layout gets the same model: rows of [label, value, label2, value2].
      ============================================================ */
   const chars = s => [...String(s)];
   const len = s => chars(s).length;
   const padR = (s, w) => s + ' '.repeat(Math.max(0, w - len(s)));
   const center = (s, w) => { const l = Math.floor((w - len(s)) / 2); return padR(' '.repeat(Math.max(0, l)) + s, w); };
+  const trimR = l => l.replace(/\s+$/, '');
 
   function wrap(text, w) {
     const out = [];
@@ -376,71 +381,150 @@
     return out.length ? out : [''];
   }
 
-  function renderNfo(model, header) {
-    const L = s => (settings.sceneLabels ? s.replace(/I/g, 'i') : s);
-    const INNER = WIDTH - 4;                         // "█ " + content + " █"
-    const COL1 = 39, COL2 = INNER - COL1, LABEL = 16;
-    const row = content => `█ ${padR(content, INNER)} █`;
-    const fixHead = label => {                       // "■ LABEL.....: " — dots only after the label
-      const lab = L(label);
-      return `■ ${lab}${'.'.repeat(Math.max(0, LABEL - len(lab)))}: `;
-    };
-    const fieldLines = (label, value, w) => {
-      const head = fixHead(label);
-      return wrap(value, w - len(head)).map((l, i) => (i ? ' '.repeat(len(head)) : head) + l);
-    };
-    const rows = list => {
-      const out = [row('')];
-      for (const [l1, v1, l2, v2] of list) {
-        const has1 = v1 != null && v1 !== '', has2 = l2 && v2 != null && v2 !== '';
-        if (!has1 && !has2) continue;
-        const a = has1 ? fieldLines(l1, v1, has2 ? COL1 : INNER) : [];
-        const b = has2 ? fieldLines(l2, v2, has1 ? COL2 : INNER) : [];
-        if (has1 && has2 && (a.length > 1 || b.length > 1)) {   // too long to sit side by side
-          fieldLines(l1, v1, INNER).forEach(x => out.push(row(x)));
-          fieldLines(l2, v2, INNER).forEach(x => out.push(row(x)));
-        } else if (has1 && has2) out.push(row(padR(a[0], COL1) + b[0]));
-        else (a.length ? a : b).forEach(x => out.push(row(x)));
-      }
-      out.push(row(''));
-      return out;
-    };
-    const bar = (title, first, last) => {
-      const l = first ? '█ ▄███▓▓▓▒▒▒░░░' : last ? '█ ▀███▓▓▓▒▒▒░░░' : '█ ████▓▓▓▒▒▒░░░';
-      const r = first ? '░░░▒▒▒▓▓▓███▄ █' : last ? '░░░▒▒▒▓▓▓███▀ █' : '░░░▒▒▒▓▓▓████ █';
-      return l + center(L(title), WIDTH - 30) + r;
-    };
-    const top = '▀'.repeat(WIDTH - 2), low = '▄'.repeat(WIDTH - 2);
-    const section = (title, body) => [`█${top}█`, bar(title), `█${low}█`, ...body];
+  const has = v => v != null && v !== '';
+  /** [[l1,v1,l2,v2], …] -> [[label, value], …] (one field per line) */
+  const flat = rows => rows.flatMap(([a, b, c, d]) => [[a, b], [c, d]]).filter(([l, v]) => l && has(v));
 
+  /** Label text: "Release size", or "RELEASE SiZE" with scene-style labels. */
+  const ACRONYMS = /^(HDR|NFO|TMDB|TVDB|IMDB|FPS|SDH)$/i;
+  function label(key, upper) {
+    if (settings.sceneLabels) return key.toUpperCase().replace(/I/g, 'i');
+    if (upper) return key.toUpperCase();
+    return key.split(' ').map((w, i) => (ACRONYMS.test(w) ? w.toUpperCase()
+      : i ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())).join(' ');
+  }
+
+  /** Label/value lines, wrapped under the value column. */
+  function kv(pairs, width, labelW, indent, sep = ' : ') {
     const out = [];
-    out.push(...header.lines);
-    if (header.lines.length) out.push('');
-    if (settings.subtitle.trim()) out.push(center(settings.subtitle.trim(), WIDTH).replace(/\s+$/, ''), '');
-    out.push(`▄█${'▀'.repeat(WIDTH - 4)}█▄`, bar('RELEASE INFOS', true), `█${low}█`, row(''));
-    wrap(model.release, INNER).forEach(l => out.push(row(center(l, INNER))));
-    out.push(...rows(model.rows));
-    out.push(...section('VIDEO', rows(model.video)));
-    model.audio.forEach((a, i) => out.push(...section(`AUDIO #${i + 1}`, rows(a))));
-    model.subs.forEach((s, i) => out.push(...section(`SUBTITLES #${i + 1}`, rows(s))));
-    if (model.links.length) out.push(...section('LINKS', rows(model.links.map(([k, u]) => [k, u]))));
-    if (settings.greetz.trim()) {
-      out.push(...section('GREETZ', [row(''), ...wrap(settings.greetz.trim(), INNER).map(l => row(center(l, INNER))), row('')]));
+    for (const [l, v] of pairs) {
+      const head = ' '.repeat(indent) + padR(label(l), labelW) + sep;
+      wrap(v, Math.max(20, width - len(head))).forEach((x, i) => out.push((i ? ' '.repeat(len(head)) : head) + x));
     }
-    out.push(`█${top}█`, bar(settings.footer.trim() || 'ENJOY', false, true), `▀█${low.slice(2)}█▀`);
-    return out.map(l => l.replace(/\s+$/, '')).join('\n');
+    return out;
+  }
+
+  function sections(m) {
+    const list = [['Details', flat(m.rows)], ['Video', flat(m.video)]];
+    m.audio.forEach((a, i) => list.push([m.audio.length > 1 ? `Audio #${i + 1}` : 'Audio', flat(a)]));
+    m.subs.forEach((t, i) => list.push([m.subs.length > 1 ? `Subtitles #${i + 1}` : 'Subtitles', flat(t)]));
+    return list;
+  }
+
+  const notes = () => [settings.greetz.trim(), settings.footer.trim()].filter(Boolean);
+  const intro = (header, w) => {
+    const out = [...header.lines];
+    if (settings.subtitle.trim()) out.push('', center(settings.subtitle.trim(), w));
+    if (out.length) out.push('');
+    return out;
+  };
+
+  const LAYOUTS = {
+    /* 1 — mediainfo-like list, no frame */
+    minimal: { name: '1 - Minimalistic', width: 80, render(m, header) {
+      const W = 80, out = intro(header, W);
+      out.push(m.release, '');
+      m.titleLines.forEach(t => out.push(t));
+      for (const [title, pairs] of sections(m)) out.push('', label(title, true), ...kv(pairs, W, 20, 0));
+      if (m.links.length) out.push('', label('Links', true), ...m.links.map(([, u]) => u));
+      if (notes().length) out.push('', ...notes().flatMap(n => wrap(n, W)));
+      return out;
+    } },
+
+    /* 2 — centred titles between double rules, tracks grouped under single rules */
+    rules: { name: '2 - Clean rules', width: 80, render(m, header) {
+      const W = 80;
+      const rule = (t, ch) => { const x = t ? ` ${t} ` : ''; const l = Math.floor((W - len(x)) / 2); return ch.repeat(l) + x + ch.repeat(W - l - len(x)); };
+      const out = intro(header, W);
+      out.push(rule(label('Release', true), '═'), '');
+      m.titleLines.forEach(t => wrap(t, W - 4).forEach(x => out.push(center(x, W))));
+      wrap(m.release, W - 4).forEach(x => out.push(center(x, W)));
+      out.push('', rule(label('Details', true), '═'), '', ...kv(flat(m.rows), W, 15, 3), '');
+      out.push(rule(label('Tracks', true), '═'));
+      for (const [title, pairs] of sections(m).slice(1)) out.push(rule(label(title), '─'), '', ...kv(pairs, W, 15, 3), '');
+      if (m.links.length) out.push(rule(label('Links', true), '═'), '', ...m.links.map(([, u]) => '   ' + u), '');
+      if (notes().length) out.push(rule(label('Notes', true), '═'), '', ...notes().flatMap(n => wrap(n, W - 4).map(x => center(x, W))), '');
+      out.push('═'.repeat(W));
+      return out;
+    } },
+
+    /* 3 — everything inside a # frame */
+    hash: { name: '3 - Hash box', width: 80, render(m, header) {
+      const W = 80, IN = W - 2;
+      const line = t => `#${padR(t, IN)}#`, blank = line(''), full = '#'.repeat(W);
+      const banner = t => [full, line(center(`[ ${t} ]`, IN)), full];
+      const out = intro(header, W);
+      out.push(...banner(label('Release', true)), blank);
+      m.titleLines.forEach(t => wrap(t, IN - 6).forEach(x => out.push(line(center(x, IN)))));
+      out.push(blank);
+      wrap(m.release, IN - 6).forEach(x => out.push(line(center(x, IN))));
+      out.push(blank);
+      for (const [title, pairs] of sections(m)) {
+        out.push(...banner(label(title, true)), blank, ...kv(pairs, IN - 3, 15, 3).map(line), blank);
+      }
+      if (m.links.length) out.push(...banner(label('Links', true)), blank, ...m.links.map(([, u]) => line('   ' + u)), blank);
+      if (notes().length) out.push(...banner(label('Notes', true)), blank, ...notes().flatMap(n => wrap(n, IN - 6).map(x => line(center(x, IN)))), blank);
+      out.push(full);
+      return out;
+    } },
+
+    /* 4 — shaded block frame, fields side by side */
+    shaded: { name: '4 - Shaded box', width: 81, render(m, header) {
+      const W = 81, INNER = W - 4, COL1 = 39, COL2 = INNER - COL1, LABEL = 16;
+      const L = t => label(t, true);
+      const row = c => `█ ${padR(c, INNER)} █`;
+      const head = l => { const lab = L(l); return `■ ${lab}${'.'.repeat(Math.max(0, LABEL - len(lab)))}: `; };
+      const field = (l, v, w) => wrap(v, w - len(head(l))).map((x, i) => (i ? ' '.repeat(len(head(l))) : head(l)) + x);
+      const rows = list => {
+        const out = [row('')];
+        for (const [l1, v1, l2, v2] of list) {
+          const a1 = has(v1), a2 = l2 && has(v2);
+          if (!a1 && !a2) continue;
+          const A = a1 ? field(l1, v1, a2 ? COL1 : INNER) : [], B = a2 ? field(l2, v2, a1 ? COL2 : INNER) : [];
+          if (a1 && a2 && (A.length > 1 || B.length > 1)) {
+            field(l1, v1, INNER).forEach(x => out.push(row(x))); field(l2, v2, INNER).forEach(x => out.push(row(x)));
+          } else if (a1 && a2) out.push(row(padR(A[0], COL1) + B[0]));
+          else (A.length ? A : B).forEach(x => out.push(row(x)));
+        }
+        out.push(row(''));
+        return out;
+      };
+      const bar = (t, pos) => {
+        const l = pos === 'top' ? '█ ▄███▓▓▓▒▒▒░░░' : pos === 'end' ? '█ ▀███▓▓▓▒▒▒░░░' : '█ ████▓▓▓▒▒▒░░░';
+        const r = pos === 'top' ? '░░░▒▒▒▓▓▓███▄ █' : pos === 'end' ? '░░░▒▒▒▓▓▓███▀ █' : '░░░▒▒▒▓▓▓████ █';
+        return l + center(t, W - 30) + r;
+      };
+      const top = '▀'.repeat(W - 2), low = '▄'.repeat(W - 2);
+      const section = (t, body) => [`█${top}█`, bar(L(t)), `█${low}█`, ...body];
+      const out = intro(header, W);
+      out.push(`▄█${'▀'.repeat(W - 4)}█▄`, bar(L('Release'), 'top'), `█${low}█`, row(''));
+      m.titleLines.forEach(t => wrap(t, INNER).forEach(x => out.push(row(center(x, INNER)))));
+      wrap(m.release, INNER).forEach(x => out.push(row(center(x, INNER))));
+      out.push(...rows(m.rows), ...section('Video', rows(m.video)));
+      m.audio.forEach((a, i) => out.push(...section(m.audio.length > 1 ? `Audio #${i + 1}` : 'Audio', rows(a))));
+      m.subs.forEach((t, i) => out.push(...section(m.subs.length > 1 ? `Subtitles #${i + 1}` : 'Subtitles', rows(t))));
+      if (m.links.length) out.push(...section('Links', rows(m.links)));
+      if (settings.greetz.trim()) out.push(...section('Notes', [row(''), ...wrap(settings.greetz.trim(), INNER).map(x => row(center(x, INNER))), row('')]));
+      out.push(`█${top}█`, bar(settings.footer.trim(), 'end'), `▀█${low.slice(2)}█▀`);
+      return out;
+    } },
+  };
+
+  function renderNfo(model, header) {
+    const layout = LAYOUTS[settings.layout] || LAYOUTS[DEFAULTS.layout];
+    return layout.render(model, header).map(trimR).join('\n');
   }
 
   /* ---------- generator entry points ---------- */
   const genCache = new Map(); // ratingKey -> info | {reason}
 
   /** mediainfo + Plex details from the NFO server. Nothing is written. */
-  async function loadGenerator(key) {
-    if (genCache.has(key)) return genCache.get(key);
+  async function loadGenerator(key, fresh) {
+    if (!fresh && genCache.has(key)) return genCache.get(key);
     const { server, error } = await resolveServer();
     if (!server) return { reason: error };
     if (caps.info === false || (!caps.info && !caps.write)) return { reason: 'Update plex-nfo-server.py on the Plex machine to generate NFOs.' };
-    const r = await gmRequest({ method: 'GET', url: `${server}/info/${key}`, timeout: 130000 });
+    const r = await gmRequest({ method: 'GET', url: `${server}/info/${key}${fresh ? '?fresh=1' : ''}`, timeout: 130000 });
     let body = {};
     try { body = JSON.parse(r.text); } catch (_) {}
     let res;
@@ -456,7 +540,8 @@
     const model = buildModel(info, v);
     const text = settings.asciiText.replace(/\{group\}/gi, model.group || 'NFO')
       .replace(/\{title\}/gi, info.type === 'episode' ? info.show : info.title);
-    const header = await asciiHeader(text);
+    const layout = LAYOUTS[settings.layout] || LAYOUTS[DEFAULTS.layout];
+    const header = text.trim() ? await asciiHeader(text, layout.width) : { lines: [] };
     return { text: renderNfo(model, header), file: model.file, release: model.release, warn: header.warn };
   }
 
@@ -592,10 +677,11 @@
   function tabList() {
     const tabs = (state.files || []).map((f, i) => ({ type: 'file', i, label: (f.label || f.name) + (f.kind === 'kodi' ? ' (Kodi XML)' : '') }));
     const gen = state.gen;
-    if (state.kind === 'ok' && !gen) tabs.push({ type: 'lazy', i: 0, label: '✨ Generate' });
+    const verb = (state.files || []).length ? '✨ Regenerate' : '✨ Generate';
+    if (state.kind === 'ok' && !gen) tabs.push({ type: 'lazy', i: 0, label: verb });
     if (gen && gen.versions) {
       gen.versions.forEach((v, i) => tabs.push({ type: 'gen', i,
-        label: `✨ Generate${gen.versions.length > 1 && v.label ? ` · ${v.label}` : ''}` }));
+        label: `${verb}${gen.versions.length > 1 && v.label ? ` · ${v.label}` : ''}` }));
     }
     return tabs;
   }
@@ -625,17 +711,18 @@
           that fails (away from home), e.g. the Plex machine's Tailscale IP from <code>tailscale ip -4</code>. Saved in this browser only.</div>
 
         <h4>NFO generator</h4>
-        <div class="row"><label class="k" for="pnfo-g-text">ASCII text</label><input type="text" id="pnfo-g-text" data-k="asciiText"></div>
+        <div class="row"><label class="k" for="pnfo-g-layout">Layout</label><select id="pnfo-g-layout" data-k="layout">${Object.entries(LAYOUTS).map(([k, l]) => `<option value="${k}">${esc(l.name)}</option>`).join('')}</select></div>
+        <div class="row"><label class="k" for="pnfo-g-text">ASCII text</label><input type="text" id="pnfo-g-text" data-k="asciiText" placeholder="optional — empty = no ASCII header"></div>
         <div class="row"><label class="k" for="pnfo-g-font">Font</label><select id="pnfo-g-font" data-k="font">${FONTS.map(f => `<option>${esc(f)}</option>`).join('')}</select></div>
         <div class="row"><label class="k" for="pnfo-g-url">Custom font URL</label><input type="text" id="pnfo-g-url" data-k="fontUrl" placeholder="https://…/MyFont.flf (optional, overrides the list)"></div>
         <div class="row"><label class="k" for="pnfo-g-spacing">Letter spacing</label>
           <select id="pnfo-g-spacing" data-k="spacing"><option value="full">Spaced (as drawn)</option><option value="fitted">Packed (figlet -k)</option></select></div>
-        <div class="row"><label class="k" for="pnfo-g-sub">Line under it</label><input type="text" id="pnfo-g-sub" data-k="subtitle"></div>
-        <div class="row"><label class="k" for="pnfo-g-greetz">Greetz</label><input type="text" id="pnfo-g-greetz" data-k="greetz" placeholder="optional — adds a GREETZ section"></div>
-        <div class="row"><label class="k" for="pnfo-g-footer">Footer</label><input type="text" id="pnfo-g-footer" data-k="footer"></div>
+        <div class="row"><label class="k" for="pnfo-g-sub">Line under it</label><input type="text" id="pnfo-g-sub" data-k="subtitle" placeholder="optional"></div>
+        <div class="row"><label class="k" for="pnfo-g-greetz">Notes / greetz</label><input type="text" id="pnfo-g-greetz" data-k="greetz" placeholder="optional — adds a Notes section"></div>
+        <div class="row"><label class="k" for="pnfo-g-footer">Footer</label><input type="text" id="pnfo-g-footer" data-k="footer" placeholder="optional — closing line"></div>
         <div class="row"><label><input type="checkbox" id="pnfo-g-scene" data-k="sceneLabels"> Scene-style labels (RESOLUTiON, AUDiO…)</label>
           <button class="pnfo-act" id="pnfo-g-reset" style="margin-left:auto">Reset generator</button></div>
-        <div class="hint"><code>{group}</code> = release group (FW…), <code>{title}</code> = film / show title. Fonts: any
+        <div class="hint"><code>{title}</code> = film / show title, <code>{group}</code> = the release group from the file name. Fonts: any
           <a href="https://patorjk.com/software/taag/" target="_blank" rel="noopener" style="color:#ccc">FIGlet font</a>,
           downloaded once and cached. <span id="pnfo-fontstatus"></span></div>
         <pre id="pnfo-preview"></pre>
@@ -643,6 +730,8 @@
       <div id="pnfo-actions" hidden>
         <button class="pnfo-act primary" id="pnfo-dl">⬇ Download .nfo</button>
         <button class="pnfo-act" id="pnfo-write">💾 Create the local .nfo file…</button>
+        <select class="pnfo-act" id="pnfo-layout-quick" title="Layout">${Object.entries(LAYOUTS).map(([k, l]) => `<option value="${k}">${esc(l.name)}</option>`).join('')}</select>
+        <button class="pnfo-act" id="pnfo-rerun" title="Read the video file again with mediainfo">↻ Re-run mediainfo</button>
         <span id="pnfo-note"></span>
       </div>
       <div id="pnfo-msg" hidden></div>
@@ -770,6 +859,10 @@
     const keep = pre.scrollTop;
     showText(r.text);
     pre.scrollTop = keep;
+    const target = `${r.release}.nfo`;
+    const replacing = (state.files || []).some(f => f.name === target);
+    $('#pnfo-write').textContent = replacing ? '♻ Replace the local .nfo with this one…' : '💾 Create the local .nfo file…';
+    $('#pnfo-layout-quick').value = settings.layout;
     $('#pnfo-write').disabled = !(chosen && caps.write);
     $('#pnfo-write').title = chosen && caps.write ? `Asks first, then writes ${r.release}.nfo next to ${r.file} on the Plex machine`
       : 'Your plex-nfo-server.py is read-only — update it to create files';
@@ -812,6 +905,23 @@
   }
   function close() { overlay.hidden = true; }
 
+  /* ---------- layout switch / re-run ---------- */
+  $('#pnfo-layout-quick').addEventListener('change', e => {
+    settings.layout = e.target.value; saveSettings();
+    const sel = $('#pnfo-g-layout'); if (sel) sel.value = settings.layout;
+    showTab(tabIndex);
+  });
+  $('#pnfo-rerun').addEventListener('click', async () => {
+    const key = currentKey, b = $('#pnfo-rerun');
+    b.disabled = true; note.textContent = 'Reading the file again…';
+    const gen = await loadGenerator(key, true);
+    b.disabled = false;
+    if (key !== currentKey) return;
+    if (!gen.versions) { note.textContent = `❌ ${gen.reason}`; return; }
+    state.gen = gen; genResult = null;
+    render();
+  });
+
   /* ---------- download / save ---------- */
   $('#pnfo-dl').addEventListener('click', () => {
     if (!genResult) return;
@@ -826,9 +936,14 @@
   $('#pnfo-write').addEventListener('click', async () => {
     if (!genResult || !currentKey) return;
     const b = $('#pnfo-write');
-    if (!confirm(`Create "${genResult.release}.nfo" next to "${genResult.file}" on the Plex machine?`)) { note.textContent = 'Nothing was written.'; return; }
+    const target = `${genResult.release}.nfo`;
+    const replacing = (state.files || []).some(f => f.name === target);
+    const question = replacing
+      ? `Replace the existing "${target}" with this generated NFO?\n\nThe current file will be overwritten.`
+      : `Create "${target}" next to "${genResult.file}" on the Plex machine?`;
+    if (!confirm(question)) { note.textContent = 'Nothing was written.'; return; }
     b.disabled = true; note.textContent = 'Writing…';
-    let r = await saveNfo(currentKey, genResult.file, genResult.text + '\n', false);
+    let r = await saveNfo(currentKey, genResult.file, genResult.text + '\n', replacing);
     if (r.exists) {
       if (!confirm(`"${r.name}" already exists next to the video. Replace it?`)) { b.disabled = false; note.textContent = 'Nothing was written.'; return; }
       r = await saveNfo(currentKey, genResult.file, genResult.text + '\n', true);
