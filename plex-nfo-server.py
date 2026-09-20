@@ -26,16 +26,20 @@ Matching is strict, based on Plex's own season/episode numbers:
 It never takes a path from the browser: paths only come from Plex itself.
 
 Run on the Plex machine:   python3 plex-nfo-server.py   (Windows: double-click it, or  py plex-nfo-server.py)
-Everything is found automatically: the Plex token (macOS preferences, Windows registry,
-Linux Preferences.xml — or, failing that, the one of the person signed in to Plex in the
-browser), and MediaInfo (offered for install at start-up if it's missing).
+Everything is found automatically:
+  - Plex: on this machine, or anywhere on the network (e.g. a NAS), found like the Plex apps do
+  - the Plex token: macOS preferences, Windows registry, Linux Preferences.xml, or else the one
+    of the person signed in to Plex in the browser
+  - the video files: when Plex runs elsewhere (a NAS), its paths (/volume1/video/…) are matched
+    to this computer's mounted shares (Z:\, \\NAS\video, /Volumes/…) and remembered
+  - MediaInfo: offered for install at start-up if it's missing
 Env overrides:
   PLEX_TOKEN     Plex token (default: found automatically, see above)
   PLEX_URL       default http://127.0.0.1:32400
   NFO_HOST       default 0.0.0.0   (LAN + Tailscale)
   NFO_PORT       default 8764
-  NFO_PATH_MAP   "plex/prefix=>local/prefix;..." if Plex sees files under
-                 another path than this machine
+  NFO_PATH_MAP   "plex/prefix=>local/prefix;..." to force a path mapping (rarely needed)
+  NFO_SEARCH_ROOTS  extra folders where the NAS shares are mounted (os.pathsep-separated)
   MEDIAINFO      path to the mediainfo CLI (default: found automatically;
                  macOS: brew install media-info)
 
@@ -49,8 +53,11 @@ import re
 import shutil
 import subprocess
 import sys
+import socket
 import threading
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -72,7 +79,7 @@ def log(msg):
     print(msg, flush=True)
 
 
-SERVER_VERSION = "3.5"
+SERVER_VERSION = "3.6"
 
 
 def plex_token():
@@ -156,11 +163,48 @@ def locations(el):
     return [Path(remap(l.get("path"))) for l in el.iter("Location") if l.get("path")]
 
 
+_learned = {}     # leading parts of a Plex path -> local folder they map to (learned automatically)
+
+
+def search_roots():
+    """Where a NAS's shared folders can be mounted on this computer."""
+    roots = [r for r in os.environ.get("NFO_SEARCH_ROOTS", "").split(os.pathsep) if r]
+    if os.name == "nt":
+        import string
+        roots += [f"{d}:\\" for d in string.ascii_uppercase if os.path.exists(f"{d}:\\")]
+        host = urllib.parse.urlparse(PLEX_URL).hostname
+        if host and host not in ("127.0.0.1", "localhost"):
+            roots.append(f"\\\\{host}")                  # \\NAS\share\… : the share is one of the path's folders
+    elif platform.system() == "Darwin":
+        roots += glob.glob("/Volumes/*")
+    else:
+        roots += glob.glob("/mnt/*") + glob.glob("/media/*") + glob.glob("/media/*/*") + glob.glob("/srv/*")
+    return roots
+
+
+def auto_map(path: str) -> str:
+    """Plex runs elsewhere (a NAS): find the same file under this computer's mounted shares."""
+    parts = [p for p in re.split(r"[\\/]+", path) if p]
+    for key, root in _learned.items():
+        if tuple(parts[:len(key)]) == key:
+            return os.path.join(root, *parts[len(key):])
+    for root in search_roots():
+        for i in range(1, len(parts)):
+            cand = os.path.join(root, *parts[i:])
+            if os.path.exists(cand):
+                _learned[tuple(parts[:i])] = root
+                log(f"  paths: Plex's {'/'.join(parts[:i])}/… = {root} on this computer")
+                return cand
+    return path
+
+
 def remap(path: str) -> str:
     for src, dst in PATH_MAP:
         if path.startswith(src):
             return dst + path[len(src):]
-    return path
+    if os.path.exists(path):
+        return path
+    return auto_map(path)
 
 
 # ------------------------------------------------------------------ names
@@ -746,6 +790,75 @@ def install_mediainfo_cmd():
     return None
 
 
+def plex_answers(url) -> bool:
+    try:
+        urllib.request.urlopen(urllib.request.Request(f"{url}/identity", headers={"Accept": "application/xml"}), timeout=3).read()
+        return True
+    except urllib.error.HTTPError:
+        return True
+    except Exception:
+        return False
+
+
+def discover_plex(timeout=2.5):
+    """Plex servers on the local network, found the way the Plex apps do it (GDM)."""
+    found = {}
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.settimeout(0.4)
+    except OSError:
+        return []
+    for target in (("239.0.0.250", 32414), ("255.255.255.255", 32414)):
+        try:
+            sock.sendto(b"M-SEARCH * HTTP/1.1\r\n\r\n", target)
+        except OSError:
+            pass
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            data, (ip, _) = sock.recvfrom(4096)
+        except socket.timeout:
+            continue
+        except OSError:
+            break
+        hdr = {}
+        for line in data.decode("utf-8", "ignore").splitlines()[1:]:
+            if ":" in line:
+                k, v = line.split(":", 1)
+                hdr[k.strip().lower()] = v.strip()
+        if "media-server" in hdr.get("content-type", "") or "port" in hdr:
+            found[ip] = (hdr.get("name") or ip, hdr.get("port") or "32400")
+    sock.close()
+    return [(f"http://{ip}:{port}", name) for ip, (name, port) in found.items()]
+
+
+def find_plex(ok, ko):
+    global PLEX_URL
+    if os.environ.get("PLEX_URL"):
+        print(f"  {ok if plex_answers(PLEX_URL) else ko}Plex at {PLEX_URL} (from PLEX_URL)")
+        return
+    if plex_answers(PLEX_URL):
+        print(f"  {ok}Plex runs on this computer")
+        return
+    print("  … Plex isn't on this computer, looking for it on the network…")
+    servers = [s for s in discover_plex() if plex_answers(s[0])]
+    if not servers:
+        print(f"  {ko}No Plex server found. Start this on the computer or NAS that runs Plex, or set PLEX_URL=http://<its IP>:32400")
+        return
+    pick = servers[0]
+    if len(servers) > 1 and sys.stdin and sys.stdin.isatty():
+        for n, (url, name) in enumerate(servers, 1):
+            print(f"     [{n}] {name}  ({url})")
+        ans = input("     Which one is yours? [1] ").strip()
+        if ans.isdigit() and 1 <= int(ans) <= len(servers):
+            pick = servers[int(ans) - 1]
+    PLEX_URL = pick[0]
+    print(f"  {ok}Plex found on the network: {pick[1]} ({PLEX_URL})")
+    print("     Its videos are read through this computer's network drives: make sure the NAS shares are")
+    print("     connected (mapped drive on Windows, mounted in Finder on macOS) — they're matched automatically.")
+
+
 def startup_checks():
     ok = "OK " if os.name == "nt" else "✓ "
     ko = "!! " if os.name == "nt" else "✗ "
@@ -754,14 +867,7 @@ def startup_checks():
         print(f"  {ok}Plex token found on this machine")
     else:
         print(f"  {ok}No Plex token stored here: the one of the person signed in to Plex in the browser will be used")
-    try:
-        req = urllib.request.Request(f"{PLEX_URL}/identity", headers={"Accept": "application/xml"})
-        urllib.request.urlopen(req, timeout=4).read()
-        print(f"  {ok}Plex answers at {PLEX_URL}")
-    except urllib.error.HTTPError:
-        print(f"  {ok}Plex answers at {PLEX_URL}")
-    except Exception:
-        print(f"  {ko}Plex doesn't answer at {PLEX_URL} — is Plex Media Server running on this machine?")
+    find_plex(ok, ko)
     if mediainfo_bin():
         print(f"  {ok}MediaInfo {mediainfo_version() or ''}".rstrip())
     else:
