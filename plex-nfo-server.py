@@ -12,7 +12,7 @@ Plex Web can't read sidecar files, so this tiny stdlib-only server does it:
                            -> writes <video name>.nfo next to that video (film/episode only).
                            Needs the caller's X-Plex-Token: Plex itself must grant it access
                            to the item, so only people who can see it in Plex can write.
-    GET  /ping             -> {"ok": true, "write": true}
+    GET  /ping             -> {"ok": true, "write": true, "info": true, "report": true, "mediainfo": true}
 
 Matching is strict, based on Plex's own season/episode numbers:
   movie    <video>.nfo, movie.nfo; any other .nfo only if the folder holds a
@@ -457,6 +457,13 @@ def sub_format(t):
 _mi_cache = {}
 
 
+def mediainfo_report(exe, path: Path) -> str:
+    """mediainfo's usual text report, with the full path reduced to the file name (no personal folders in NFOs)."""
+    out = subprocess.run([exe, str(path)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+    lines = out.stdout.replace("\r", "").rstrip().split("\n")
+    return "\n".join(re.sub(r"^(Complete name\s*:\s*).*$", lambda m: m.group(1) + path.name, l) for l in lines)
+
+
 def mediainfo(path: Path, fresh=False):
     """Normalised mediainfo of one file (cached per path + size + mtime)."""
     st = path.stat()
@@ -476,6 +483,7 @@ def mediainfo(path: Path, fresh=False):
     info = {
         "file": path.name,
         "release": path.stem,
+        "report": mediainfo_report(exe, path),
         "size": num(g.get("FileSize"), int) or st.st_size,
         "duration": num(g.get("Duration")),
         "container": g.get("Format"),
@@ -622,7 +630,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path == "/ping":
-            return self.reply(200, {"ok": True, "write": True, "info": True, "mediainfo": bool(mediainfo_bin())})
+            return self.reply(200, {"ok": True, "write": True, "info": True, "report": True, "mediainfo": bool(mediainfo_bin())})
         m = re.fullmatch(r"/info/(\d+)", path)
         if m:
             try:
