@@ -193,15 +193,9 @@
     if (Date.now() - e.t > settings.cacheDays * 864e5) { delete cache[cacheKey(id)]; return null; }
     return e.v.map(a => ({ event: a[0], year: a[1] || null, category: a[2] || '', isWinner: !!a[3] }));
   }
-  /** True when we stored English text under a French key (the FR page didn't answer). */
-  function cachePartial(id) {
-    const e = cache[cacheKey(id)];
-    return !!e && e.p === 0;
-  }
-  function cacheSet(id, items, localised) {
+  function cacheSet(id, items) {
     cache[cacheKey(id)] = {
       t: Date.now(),
-      p: localised === false ? 0 : 1,
       v: items.slice(0, 150).map(i => [i.event, i.year || 0, i.category || '', i.isWinner ? 1 : 0]),
     };
     const keys = Object.keys(cache).filter(k => k !== '__v');
@@ -357,44 +351,23 @@
     });
   }
 
-  /* IMDb answers a background request with 403 (bot check) or 429 (too many
-     requests) far more often than it actually fails. Those deserve another
-     try a moment later; a clean answer with no awards does not. Every source
-     below therefore reports { ok, items } or { ok:false, retry }.            */
-  const SOFT_STATUS = new Set([0, 403, 408, 425, 429, 500, 502, 503, 504]);
-  const softFail = status => ({ ok: false, retry: SOFT_STATUS.has(status === undefined ? 0 : status) });
-
   function gql(id, query, cb) {
     GM_xmlhttpRequest({
       method: 'POST',
       url: GQL_URL,
-      headers: Object.assign({
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        'x-imdb-client-name': 'imdb-web-next',
-      }, localeHeaders()),
+      headers: Object.assign({ 'Content-Type': 'application/json', Accept: 'application/json' }, localeHeaders()),
       data: JSON.stringify({ query, variables: { id } }),
       timeout: 12000,
       onload: res => {
-        if (res.status && (res.status < 200 || res.status >= 300)) return cb(softFail(res.status));
         try {
           const j = JSON.parse(res.responseText);
-          if (j && j.errors && j.errors.length) return cb({ ok: false, retry: true });
           const noms = j && j.data && j.data.title && j.data.title.awardNominations;
-          if (!noms || !Array.isArray(noms.edges)) return cb({ ok: false, retry: false });
-          cb({ ok: true, items: dedupe(noms.edges.map(e => normNode(e.node))) });
-        } catch (e) { cb({ ok: false, retry: true }); }   // an error page instead of JSON
+          if (!noms || !Array.isArray(noms.edges)) return cb(null);
+          cb(dedupe(noms.edges.map(e => normNode(e.node))));
+        } catch (e) { cb(null); }
       },
-      onerror: () => cb({ ok: false, retry: true }),
-      ontimeout: () => cb({ ok: false, retry: true }),
-    });
-  }
-
-  /** The full query first, then the lighter one if IMDb rejects a field. */
-  function fromApi(id, cb) {
-    gql(id, GQL_FULL, r => {
-      if (r.ok) return cb(r);
-      gql(id, GQL_MIN, r2 => cb(r2.ok ? r2 : { ok: false, retry: r.retry || r2.retry }));
+      onerror: () => cb(null),
+      ontimeout: () => cb(null),
     });
   }
 
@@ -467,77 +440,44 @@
       method: 'GET',
       url: awardsUrl(id),
       headers: Object.assign({ Accept: 'text/html' }, localeHeaders()),
-      timeout: 20000,
+      timeout: 15000,
       onload: res => {
-        if (res.status && (res.status < 200 || res.status >= 300)) return cb(softFail(res.status));
         const html = res.responseText || '';
-        const items = fromEmbeddedJson(html) || fromDom(html);
-        // A page we can't read at all is usually a consent or bot-check page.
-        cb(items ? { ok: true, items } : { ok: false, retry: true });
+        cb(fromEmbeddedJson(html) || fromDom(html));
       },
-      onerror: () => cb({ ok: false, retry: true }),
-      ontimeout: () => cb({ ok: false, retry: true }),
+      onerror: () => cb(null),
+      ontimeout: () => cb(null),
     });
   }
 
   /**
-   * Cache-first orchestration.
-   *
-   * The API comes first: it answers a small JSON, where the page weighs
-   * several megabytes and is the one IMDb blocks most readily. In French
-   * the page is still read, but afterwards and in the background, only to
-   * replace the text with IMDb's French wording — so a refused page costs
-   * you the translation, never the awards themselves.
-   *
-   * When IMDb refuses (403 / 429 / timeout…) the whole thing is tried again
-   * twice, a couple of seconds apart. The card keeps saying "Awards…" in the
-   * meantime, and only gives up once those attempts are spent.
+   * Cache-first orchestration. The order of the sources depends on the
+   * language, because only the HTML page is guaranteed to be localised.
    */
-  const RETRY_DELAYS = [1500, 4000];
-
   function fetchAwards(id, cb, force) {
     if (!force) {
       const hit = cacheGet(id);
-      if (hit) {
-        cb(hit, false);
-        // English text stored under a French key: try the translation again, quietly.
-        if (cachePartial(id) && wantFrench() && settings.source !== 'api') localise(id, cb);
-        return;
-      }
+      if (hit) return cb(hit, false);
     }
 
-    const PAGE = next => fromPage(id, r => (r.ok ? done(r.items, true) : next(r)));
-    const API = next => fromApi(id, r => (r.ok ? done(r.items, !wantFrench()) : next(r)));
+    const PAGE = next => fromPage(id, r => (r ? done(r) : next()));
+    const API = next => gql(id, GQL_FULL, r => {
+      if (r) return done(r);
+      gql(id, GQL_MIN, r2 => (r2 ? done(r2) : next()));
+    });
 
     let chain;
     if (settings.source === 'page') chain = [PAGE, API];
-    else chain = [API, PAGE];      // the API leads, even in French
+    else if (settings.source === 'api') chain = [API, PAGE];
+    else chain = wantFrench() ? [PAGE, API] : [API, PAGE];
 
-    (function attempt(round) {
-      let i = 0, soft = false;
-      (function next(r) {
-        if (r && r.retry) soft = true;
-        if (i < chain.length) return chain[i++](next);
-        // every source failed
-        if (soft && round < RETRY_DELAYS.length) return setTimeout(() => attempt(round + 1), RETRY_DELAYS[round]);
-        cb([], true);
-      })(null);
-    })(0);
+    let i = 0;
+    (function next() {
+      if (i >= chain.length) return cb([], true);
+      chain[i++](next);
+    })();
 
-    function done(items, localised) {
-      cacheSet(id, items, localised);
-      cb(items, false);
-      if (!localised && wantFrench() && settings.source !== 'api') localise(id, cb);
-    }
-  }
-
-  /** Background pass: swap English text for IMDb's French wording, if it answers. */
-  function localise(id, cb) {
-    fromPage(id, r => {
-      if (!r.ok) return;                 // keep what we already show
-      cacheSet(id, r.items, true);
-      cb(r.items, false);
-    });
+    function done(items) { cacheSet(id, items); cb(items, false); }
   }
 
   /* ============================================================
@@ -1311,12 +1251,11 @@
   // Plex constantly re-renders its React tree: if our card gets swept
   // away we put it straight back, without firing a single new request.
   setInterval(() => {
-    if (document.hidden) return;              // nothing to do in a background tab
     const watching = isWatching();
     const c = document.getElementById(CARD_ID);
     if (c) { c.style.display = watching ? 'none' : ''; return; }
     if (!watching && state && state.imdb && getRatingKey() === lastKey) render();
-  }, 1200);
+  }, 900);
 
   // Corner-anchored cards re-check their neighbours when the window changes.
   window.addEventListener('resize', () => {
@@ -1325,13 +1264,6 @@
   });
 
   window.addEventListener('hashchange', () => update());
-
-  // Plex mutates the DOM constantly: coalesce those bursts into one check.
-  let moQueued = false;
-  new MutationObserver(() => {
-    if (moQueued) return;
-    moQueued = true;
-    setTimeout(() => { moQueued = false; update(); }, 200);
-  }).observe(document.body, { childList: true, subtree: true });
+  new MutationObserver(() => update()).observe(document.body, { childList: true, subtree: true });
   update();
 })();
