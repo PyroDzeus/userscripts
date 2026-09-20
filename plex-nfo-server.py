@@ -25,9 +25,12 @@ Matching is strict, based on Plex's own season/episode numbers:
 
 It never takes a path from the browser: paths only come from Plex itself.
 
-Run on the Plex machine:   python3 plex-nfo-server.py
+Run on the Plex machine:   python3 plex-nfo-server.py   (Windows: double-click it, or  py plex-nfo-server.py)
+Everything is found automatically: the Plex token (macOS preferences, Windows registry,
+Linux Preferences.xml — or, failing that, the one of the person signed in to Plex in the
+browser), and MediaInfo (offered for install at start-up if it's missing).
 Env overrides:
-  PLEX_TOKEN     Plex token (default: read from PMS preferences on macOS)
+  PLEX_TOKEN     Plex token (default: found automatically, see above)
   PLEX_URL       default http://127.0.0.1:32400
   NFO_HOST       default 0.0.0.0   (LAN + Tailscale)
   NFO_PORT       default 8764
@@ -38,12 +41,15 @@ Env overrides:
 
 Nothing is ever written unless the userscript's "Save" button is clicked.
 """
+import glob
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -66,23 +72,57 @@ def log(msg):
     print(msg, flush=True)
 
 
-def plex_token() -> str:
+SERVER_VERSION = "3.5"
+
+
+def plex_token():
+    """The Plex Media Server's own token, wherever Plex keeps it on this machine (or None)."""
     tok = os.environ.get("PLEX_TOKEN", "").strip()
     if tok:
         return tok
-    try:  # macOS PMS keeps it in its preferences
-        out = subprocess.run(
-            ["defaults", "read", "com.plexapp.plexmediaserver", "PlexOnlineToken"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        if out:
-            return out
-    except Exception:
-        pass
-    sys.exit("No Plex token found — set PLEX_TOKEN=...")
+    system = platform.system()
+    if system == "Darwin":
+        try:
+            out = subprocess.run(["defaults", "read", "com.plexapp.plexmediaserver", "PlexOnlineToken"],
+                                 capture_output=True, text=True).stdout.strip()
+            if out:
+                return out
+        except OSError:
+            pass
+    if system == "Windows":
+        try:
+            import winreg
+            for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                try:
+                    with winreg.OpenKey(hive, r"Software\Plex, Inc.\Plex Media Server") as k:
+                        val, _ = winreg.QueryValueEx(k, "PlexOnlineToken")
+                        if val:
+                            return str(val)
+                except OSError:
+                    continue
+        except ImportError:
+            pass
+    # Linux / NAS / Docker: Preferences.xml
+    bases = [os.environ.get("PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR", ""),
+             "/var/lib/plexmediaserver/Library/Application Support",
+             "/var/snap/plexmediaserver/common/Library/Application Support",
+             "/config/Library/Application Support",
+             os.path.expanduser("~/Library/Application Support"),
+             os.environ.get("LOCALAPPDATA", "")]
+    for base in filter(None, bases):
+        for pref in glob.glob(os.path.join(base, "Plex Media Server", "Preferences.xml")) + \
+                glob.glob(os.path.join(base, "Preferences.xml")):
+            try:
+                m = re.search(r'PlexOnlineToken="([^"]+)"', open(pref, encoding="utf-8", errors="ignore").read())
+                if m:
+                    return m.group(1)
+            except OSError:
+                pass
+    return None
 
 
 TOKEN = plex_token()
+_ctx = threading.local()      # per request: the token the browser sent, used when TOKEN is None
 
 
 # ------------------------------------------------------------------ Plex
@@ -91,7 +131,7 @@ TOKEN = plex_token()
 def plex_get(path: str, token: str = None) -> ET.Element:
     req = urllib.request.Request(
         f"{PLEX_URL}{path}",
-        headers={"X-Plex-Token": token or TOKEN, "Accept": "application/xml"},
+        headers={"X-Plex-Token": token or TOKEN or getattr(_ctx, "token", None) or "", "Accept": "application/xml"},
     )
     with urllib.request.urlopen(req, timeout=8) as r:
         return ET.fromstring(r.read())
@@ -363,8 +403,25 @@ MAX_WRITE = 128 * 1024
 # ------------------------------------------------------------------ mediainfo (for generated NFOs)
 
 
+def mediainfo_version():
+    exe = mediainfo_bin()
+    if not exe:
+        return None
+    try:
+        out = subprocess.run([exe, "--Version"], capture_output=True, text=True, timeout=10).stdout.strip().splitlines()
+        return out[-1].replace("MediaInfoLib - ", "") if out else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
 def mediainfo_bin():
-    for c in (os.environ.get("MEDIAINFO"), shutil.which("mediainfo"),
+    win = []
+    if os.name == "nt":
+        la, pf = os.environ.get("LOCALAPPDATA", ""), os.environ.get("ProgramFiles", r"C:\Program Files")
+        win = glob.glob(os.path.join(la, "Microsoft", "WinGet", "Packages", "MediaArea.MediaInfo*", "**", "MediaInfo.exe"), recursive=True)
+        win += [os.path.join(pf, d, "MediaInfo.exe") for d in ("MediaInfo_CLI", "MediaInfo CLI", "MediaInfoCLI")]
+        win = [w for w in win if "gui" not in w.lower()]
+    for c in (os.environ.get("MEDIAINFO"), shutil.which("mediainfo"), *win,
               "/opt/homebrew/bin/mediainfo", "/usr/local/bin/mediainfo", "/usr/bin/mediainfo"):
         if c and os.path.isfile(c) and os.access(c, os.X_OK):
             return c
@@ -629,8 +686,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
+        _ctx.token = (self.headers.get("X-Plex-Token") or "").strip() or None
         if path == "/ping":
-            return self.reply(200, {"ok": True, "write": True, "info": True, "report": True, "mediainfo": bool(mediainfo_bin())})
+            return self.reply(200, {"ok": True, "write": True, "info": True, "report": True, "version": SERVER_VERSION,
+                                    "mediainfo": bool(mediainfo_bin()), "mediainfoVersion": mediainfo_version()})
+        if not (TOKEN or _ctx.token):
+            return self.reply(401, {"error": "No Plex token: sign in to Plex in this browser, or start the server with PLEX_TOKEN=…"})
         m = re.fullmatch(r"/info/(\d+)", path)
         if m:
             try:
@@ -670,6 +731,76 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def install_mediainfo_cmd():
+    system = platform.system()
+    if system == "Darwin" and shutil.which("brew"):
+        return ["brew", "install", "media-info"]
+    if system == "Windows" and shutil.which("winget"):
+        return ["winget", "install", "-e", "--id", "MediaArea.MediaInfo", "--accept-source-agreements", "--accept-package-agreements"]
+    if system == "Linux":
+        for pm, cmd in (("apt-get", ["sudo", "apt-get", "install", "-y", "mediainfo"]),
+                        ("dnf", ["sudo", "dnf", "install", "-y", "mediainfo"]),
+                        ("pacman", ["sudo", "pacman", "-S", "--noconfirm", "mediainfo"])):
+            if shutil.which(pm):
+                return cmd
+    return None
+
+
+def startup_checks():
+    ok = "OK " if os.name == "nt" else "✓ "
+    ko = "!! " if os.name == "nt" else "✗ "
+    print(f"plex-nfo-server {SERVER_VERSION}")
+    if TOKEN:
+        print(f"  {ok}Plex token found on this machine")
+    else:
+        print(f"  {ok}No Plex token stored here: the one of the person signed in to Plex in the browser will be used")
+    try:
+        req = urllib.request.Request(f"{PLEX_URL}/identity", headers={"Accept": "application/xml"})
+        urllib.request.urlopen(req, timeout=4).read()
+        print(f"  {ok}Plex answers at {PLEX_URL}")
+    except urllib.error.HTTPError:
+        print(f"  {ok}Plex answers at {PLEX_URL}")
+    except Exception:
+        print(f"  {ko}Plex doesn't answer at {PLEX_URL} — is Plex Media Server running on this machine?")
+    if mediainfo_bin():
+        print(f"  {ok}MediaInfo {mediainfo_version() or ''}".rstrip())
+    else:
+        cmd = install_mediainfo_cmd()
+        print(f"  {ko}MediaInfo is missing (needed to generate NFOs; reading NFOs works without it)")
+        if cmd and sys.stdin and sys.stdin.isatty():
+            ans = input(f"     Install it now with: {' '.join(cmd)} ? [Y/n] ").strip().lower()
+            if ans in ("", "y", "yes", "o", "oui"):
+                subprocess.run(cmd)
+                print(f"  {ok}MediaInfo installed" if mediainfo_bin() else
+                      f"  {ko}Still not found — install the MediaInfo *CLI* from https://mediaarea.net/en/MediaInfo")
+        elif not cmd:
+            print("     Install the MediaInfo CLI from https://mediaarea.net/en/MediaInfo")
+    print(f"\nReady on port {PORT}. Leave this window open while you use Plex.")
+    if os.name == "nt":
+        print("If Windows asks whether Python may use the network, click Allow (private networks).")
+
+
+def main():
+    for stream in (sys.stdout, sys.stderr):      # Windows consoles: never crash on a special character
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+    startup_checks()
+    try:
+        server = ThreadingHTTPServer((HOST, PORT), Handler)
+    except OSError as e:
+        print(f"\nCan't listen on port {PORT}: {e.strerror or e}. Is plex-nfo-server already running in another window?")
+        raise SystemExit(1)
+    server.serve_forever()
+
+
 if __name__ == "__main__":
-    print(f"plex-nfo-server on http://{HOST}:{PORT}  (Plex: {PLEX_URL})", flush=True)
-    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    except SystemExit:
+        if sys.stdin and sys.stdin.isatty():          # double-clicked: don't let the window vanish
+            input("\nPress Enter to close.")
+        raise
