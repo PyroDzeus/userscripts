@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex NFO Viewer 📄
 // @namespace    https://github.com/PyroDzeus/userscripts
-// @version      3.5.0
+// @version      3.6.0
 // @description  Reads the .nfo of a film, series, season or episode in Plex Web, like Jellyfin — and builds a release-style NFO from mediainfo, with your own FIGlet ASCII header, when there is none. Nothing is written to disk unless you click Save. Needs plex-nfo-server.py on the Plex machine.
 // @author       Pyro
 // @license      MIT
@@ -132,6 +132,7 @@
     const list = [];
     const h = plexHost();
     if (h && isHomeOrPrivate(h)) list.push(`http://${h.includes(':') && !h.startsWith('[') ? `[${h}]` : h}:${NFO_PORT}`);
+    list.push(`http://127.0.0.1:${NFO_PORT}`);   // Plex on a NAS: the NFO server usually runs on this very computer
     list.push(...savedServers());
     return [...new Set(list)];
   }
@@ -151,7 +152,8 @@
       const p = await ping(c);
       if (p) { chosen = c; caps = p; log('server', c, p); return { server: c }; }
     }
-    if (!list.length && plexHost()) {
+    const h = plexHost();
+    if (h && !isHomeOrPrivate(h) && !savedServers().length) {
       return { error: "You're away from home: the NFO server isn't reachable through Plex's public address. Set the Plex machine's Tailscale address in ⚙ Settings." };
     }
     if (!list.length) return { error: 'Plex server not detected yet — reload the page, or set the server address in ⚙ Settings.' };
