@@ -68,4 +68,4 @@ At home the server is found automatically from your Plex connection. Away from h
 
 The address is saved in your browser only. The script contains no IP, hostname or other personal settings.
 
-[← Back to all scripts](../README.md)
+[← Back to all scripts](README.md)
