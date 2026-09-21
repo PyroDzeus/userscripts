@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex Pyro Custom UI 🔥
 // @namespace    plex-pyro-custom-ui
-// @version      1.5.1
+// @version      1.5.2
 // @author       Pyro
 // @description  Theme Park themes + stable top bar + guaranteed custom logo + flags + Blu-ray/DVD/LaserDisc/4K UHD/WEB badges + studio logos
 // @match        https://app.plex.tv/*
@@ -637,18 +637,21 @@ GM_addStyle(`
   function server() {
     const urls = [...document.querySelectorAll('img[src*="X-Plex-Token"]')].map(i => i.src);
     try { performance.getEntriesByType("resource").forEach(e => { if (/X-Plex-Token/.test(e.name)) urls.push(e.name); }); } catch (_) {}
+    let token = null, origin = null;
     for (const u of urls.reverse()) {
       try {
         const url = new URL(u, location.href);
-        if (/plex\.tv$/.test(url.hostname)) continue;
-        return { origin: url.origin, token: url.searchParams.get("X-Plex-Token") };
+        if (/plex\.tv$/.test(url.hostname)) continue;          // Plex's own service, not your library
+        token = url.searchParams.get("X-Plex-Token");
+        if (token) { origin = url.origin; break; }
       } catch (_) {}
     }
-    if (location.pathname.startsWith("/web")) {
-      let t = null; try { t = localStorage.getItem("myPlexAccessToken"); } catch (_) {}
-      return { origin: location.origin, token: t };
-    }
-    return null;
+    if (!token) { try { token = localStorage.getItem("myPlexAccessToken"); } catch (_) {} }
+    if (!token) return null;
+    // Page served by the server itself: talk to it directly rather than through
+    // whatever address its images happen to use (a VPN one, typically).
+    const servedByPlex = location.port === "32400" || /^\/web(\/|$)/.test(location.pathname);
+    return { origin: servedByPlex ? location.origin : origin, token };
   }
 
   const ratingKey = () => {
