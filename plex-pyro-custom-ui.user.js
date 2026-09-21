@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex Pyro Custom UI 🔥
 // @namespace    plex-pyro-custom-ui
-// @version      1.5
+// @version      1.5.1
 // @author       Pyro
 // @description  Theme Park themes + stable top bar + guaranteed custom logo + flags + Blu-ray/DVD/LaserDisc/4K UHD/WEB badges + studio logos
 // @match        https://app.plex.tv/*
@@ -305,7 +305,7 @@ GM_addStyle(`
     "[data-pyro-ignore]",
     "#pnfo-overlay", ".pnfo-inline",            // Plex NFO Viewer
     "#paw-card",                                // Plex Awards
-    "#psk-col", "#psk-panel",                   // Plex Sidekick
+    "#psk-col", "#psk-panel", ".psk-menu",      // Plex Sidekick
     "#pwh-host", "#pwh-btn",                    // Plex Wheel
     "#pyro-logo-bar", "#pyro-theme-switcher",   // this script's own controls
     "pre", "code", "textarea", "input", "select", "script", "style", "[contenteditable]"
