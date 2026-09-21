@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex Awards 🏆
 // @namespace    plex.awards
-// @version      2.1.2
+// @version      2.1.3
 // @description  IMDb awards & nominations shown directly on the Plex page — ranked by prestige, summarised in one line, expandable, with a link to the title's /awards/ page. Fully bilingual: in French the data itself is pulled from IMDb's French pages.
 // @match        https://app.plex.tv/*
 // @match        http://*/web/*
@@ -24,7 +24,7 @@
   'use strict';
 
   // One line in the console so you can tell at a glance that the script started.
-  console.info('[Plex Awards] 2.1.2 loaded');
+  console.info('[Plex Awards] 2.1.3 loaded');
 
   const CARD_ID = 'paw-card';
   const STORE = 'pawSettings';
@@ -259,8 +259,22 @@
     return out;
   }
 
+  /* When Plex Web is served by the server itself (127.0.0.1:32400, /web/…),
+     its own address is the shortest and most reliable way in — no VPN, no
+     detour. The token is the same whichever address you use, so we take the
+     first one the page offers and put the local address at the front. */
+  function localFirst(list) {
+    const servedByPlex = location.port === '32400' || /^\/web(\/|$)/.test(location.pathname);
+    if (!servedByPlex || !list.length) return list;
+    if (list.some(s => s.origin === location.origin)) {
+      return [list.find(s => s.origin === location.origin), ...list.filter(s => s.origin !== location.origin)];
+    }
+    const here = { origin: location.origin, token: list[0].token };
+    return badServers.has(here.origin + '|' + here.token) ? list : [here, ...list];
+  }
+
   function getServerInfo() {
-    if (!serverInfo) serverInfo = serverList()[0] || null;
+    if (!serverInfo) serverInfo = localFirst(serverList())[0] || null;
     return serverInfo;
   }
 
