@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex Sidekick 🔗▶️
 // @namespace    pyro.plex.sidekick
-// @version      6.0.2
+// @version      6.0.3
 // @description  Ton copilote Plex Web : boutons (avec logos) vers 20+ services (TMDB, IMDb, Letterboxd, JustWatch, Blu-ray.com, LDDb, DVDCompare, Criterion…) + lecture directe dans le lecteur de ton choix (IINA, Infuse, mpv, VLC, PotPlayer) avec choix de la version (4K, 1080p…) + épisode suivant + copie de l'URL directe. Colonne réductible, 7 styles dont des icônes compactes (cercles / petits carrés).
 // @author       Pyro
 // @license      MIT
@@ -25,7 +25,7 @@
   'use strict';
 
   // One line in the console so you can tell at a glance that the script started.
-  console.info('[Plex Sidekick] 6.0.2 loaded');
+  console.info('[Plex Sidekick] 6.0.3 loaded');
 
   const COL_ID = 'psk-col';
   const PANEL_ID = 'psk-panel';
@@ -786,7 +786,7 @@
 
     /* ---------- menu des versions ---------- */
     .psk-menu {
-      position: fixed; z-index: 100001; min-width: 260px; max-width: 380px; padding: 6px;
+      position: fixed; z-index: 2147483000; min-width: 260px; max-width: 380px; padding: 6px;
       background: #16181d; border: 1px solid #34363c; border-radius: 10px;
       box-shadow: 0 12px 34px rgba(0,0,0,.6); font: 12px -apple-system, Helvetica, Arial, sans-serif;
       animation: psk-pop .14s ease;
@@ -794,9 +794,12 @@
     @keyframes psk-pop { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: none; } }
     .psk-menu-h { padding: 5px 8px 7px; color: #9aa0aa; font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
     .psk-menu-i {
-      display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; cursor: pointer;
+      display: flex !important; flex-direction: column !important; align-items: flex-start !important;
+      gap: 2px; width: 100%; text-align: left; cursor: pointer; position: static !important;
       padding: 7px 9px; border: none; border-radius: 7px; background: none; color: #eee;
+      height: auto !important; min-height: 0; line-height: 1.35 !important; white-space: normal;
     }
+    .psk-menu-i > span { display: block !important; position: static !important; width: 100%; }
     .psk-menu-i:hover, .psk-menu-i:focus-visible { background: #262a33; outline: none; }
     .psk-menu-i.def .psk-menu-t::after { content: '  ★ par défaut'; color: #e5a00d; font-weight: 600; font-size: 10.5px; }
     .psk-menu-t { font-weight: 700; font-size: 12.5px; }
@@ -1035,6 +1038,7 @@
     const def = pickVersion(data.versions, settings.versionPref);
     menuEl = document.createElement('div');
     menuEl.className = 'psk-menu';
+    menuEl.dataset.pyroIgnore = '';     // Custom UI & co: hands off this menu
     const h = document.createElement('div');
     h.className = 'psk-menu-h';
     h.textContent = `Lire dans ${settings.player.name}`;
@@ -1481,6 +1485,19 @@ disown</pre>
   /* ============================================================
      BOUCLE PRINCIPALE
      ============================================================ */
+  // Typing PSK() in the browser console says what the column is up to.
+  window.PSK = () => JSON.stringify({
+    version: '6.0.3',
+    key: getRatingKey(),
+    lastKey,
+    server: !!getServerInfo(),
+    data: currentData ? { kind: currentData.kind, versions: (currentData.versions || []).length } : currentData,
+    cached: getRatingKey() in cache ? !!cache[getRatingKey()] : 'no',
+    collapsed: !!settings.ui.collapsed,
+    watching: isWatching(),
+    column: (() => { const c = document.getElementById(COL_ID); return c ? (getComputedStyle(c).display + ' @' + Math.round(c.getBoundingClientRect().top)) : 'absent'; })(),
+  });
+
   function update(retries = 0) {
     const key = getRatingKey();
     if (!key) { removeContainer(); lastKey = null; return; }
