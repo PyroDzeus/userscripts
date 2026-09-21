@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex Sidekick 🔗▶️
 // @namespace    pyro.plex.sidekick
-// @version      6.0.3
+// @version      6.0.4
 // @description  Ton copilote Plex Web : boutons (avec logos) vers 20+ services (TMDB, IMDb, Letterboxd, JustWatch, Blu-ray.com, LDDb, DVDCompare, Criterion…) + lecture directe dans le lecteur de ton choix (IINA, Infuse, mpv, VLC, PotPlayer) avec choix de la version (4K, 1080p…) + épisode suivant + copie de l'URL directe. Colonne réductible, 7 styles dont des icônes compactes (cercles / petits carrés).
 // @author       Pyro
 // @license      MIT
@@ -25,7 +25,7 @@
   'use strict';
 
   // One line in the console so you can tell at a glance that the script started.
-  console.info('[Plex Sidekick] 6.0.3 loaded');
+  console.info('[Plex Sidekick] 6.0.4 loaded');
 
   const COL_ID = 'psk-col';
   const PANEL_ID = 'psk-panel';
@@ -314,8 +314,22 @@
     return out;
   }
 
+  /* When Plex Web is served by the server itself (127.0.0.1:32400, /web/…),
+     its own address is the shortest and most reliable way in — no VPN, no
+     detour. The token is the same whichever address you use, so we take the
+     first one the page offers and put the local address at the front. */
+  function localFirst(list) {
+    const servedByPlex = location.port === '32400' || /^\/web(\/|$)/.test(location.pathname);
+    if (!servedByPlex || !list.length) return list;
+    if (list.some(s => s.origin === location.origin)) {
+      return [list.find(s => s.origin === location.origin), ...list.filter(s => s.origin !== location.origin)];
+    }
+    const here = { origin: location.origin, token: list[0].token };
+    return badServers.has(here.origin + '|' + here.token) ? list : [here, ...list];
+  }
+
   function getServerInfo() {
-    if (!serverInfo) serverInfo = serverList()[0] || null;
+    if (!serverInfo) serverInfo = localFirst(serverList())[0] || null;
     return serverInfo;
   }
 
@@ -1487,7 +1501,7 @@ disown</pre>
      ============================================================ */
   // Typing PSK() in the browser console says what the column is up to.
   window.PSK = () => JSON.stringify({
-    version: '6.0.3',
+    version: "6.0.4",
     key: getRatingKey(),
     lastKey,
     server: !!getServerInfo(),
