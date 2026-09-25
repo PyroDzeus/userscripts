@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex Awards 🏆
 // @namespace    plex.awards
-// @version      2.1.3
+// @version      2.1.4
 // @description  IMDb awards & nominations shown directly on the Plex page — ranked by prestige, summarised in one line, expandable, with a link to the title's /awards/ page. Fully bilingual: in French the data itself is pulled from IMDb's French pages.
 // @match        https://app.plex.tv/*
 // @match        http://*/web/*
@@ -24,7 +24,7 @@
   'use strict';
 
   // One line in the console so you can tell at a glance that the script started.
-  console.info('[Plex Awards] 2.1.3 loaded');
+  console.info('[Plex Awards] 2.1.4 loaded');
 
   const CARD_ID = 'paw-card';
   const STORE = 'pawSettings';
@@ -288,15 +288,21 @@
 
   function fetchXml(srv, path, cb) {
     const sep = path.includes('?') ? '&' : '?';
+    let done = false;
+    const once = doc => { if (!done) { done = true; cb(doc); } };
     GM_xmlhttpRequest({
       method: 'GET',
       url: `${srv.origin}${path}${sep}X-Plex-Token=${srv.token}`,
       headers: { Accept: 'application/xml' },
+      timeout: 8000,
       onload: res => {
-        try { cb(new DOMParser().parseFromString(res.responseText, 'text/xml')); } catch (e) { cb(null); }
+        if (res.status && (res.status < 200 || res.status >= 300)) return once(null);
+        try { once(new DOMParser().parseFromString(res.responseText, 'text/xml')); } catch (e) { once(null); }
       },
-      onerror: () => cb(null),
+      onerror: () => once(null),
+      ontimeout: () => once(null),
     });
+    setTimeout(() => once(null), 10000);     // a request that never ends would freeze the card
   }
 
   /** Pull the few fields we need out of a Plex metadata document. */
