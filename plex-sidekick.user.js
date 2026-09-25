@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex Sidekick 🔗▶️
 // @namespace    pyro.plex.sidekick
-// @version      6.0.4
+// @version      6.1.0
 // @description  Ton copilote Plex Web : boutons (avec logos) vers 20+ services (TMDB, IMDb, Letterboxd, JustWatch, Blu-ray.com, LDDb, DVDCompare, Criterion…) + lecture directe dans le lecteur de ton choix (IINA, Infuse, mpv, VLC, PotPlayer) avec choix de la version (4K, 1080p…) + épisode suivant + copie de l'URL directe. Colonne réductible, 7 styles dont des icônes compactes (cercles / petits carrés).
 // @author       Pyro
 // @license      MIT
@@ -25,7 +25,7 @@
   'use strict';
 
   // One line in the console so you can tell at a glance that the script started.
-  console.info('[Plex Sidekick] 6.0.4 loaded');
+  console.info('[Plex Sidekick] 6.1.0 loaded');
 
   const COL_ID = 'psk-col';
   const PANEL_ID = 'psk-panel';
@@ -344,18 +344,27 @@
   /* ============================================================
      MÉTADONNÉES (type-aware)
      ============================================================ */
+  /* A request with no time limit can hang for good — an address that stopped
+     answering (a VPN one, typically) leaves the column greyed out for ever,
+     stuck on "chargement…". Hence the timeout, and the status check. */
   function fetchXml(srv, path, cb) {
     const sep = path.includes('?') ? '&' : '?';
+    let done = false;
+    const once = doc => { if (!done) { done = true; cb(doc); } };
     GM_xmlhttpRequest({
       method: 'GET',
       url: `${srv.origin}${path}${sep}X-Plex-Token=${srv.token}`,
       headers: { Accept: 'application/xml' },
+      timeout: 8000,
       onload: res => {
-        try { cb(new DOMParser().parseFromString(res.responseText, 'text/xml')); }
-        catch (e) { cb(null); }
+        if (res.status && (res.status < 200 || res.status >= 300)) return once(null);
+        try { once(new DOMParser().parseFromString(res.responseText, 'text/xml')); }
+        catch (e) { once(null); }
       },
-      onerror: () => cb(null),
+      onerror: () => once(null),
+      ontimeout: () => once(null),
     });
+    setTimeout(() => once(null), 10000);     // belt and braces: never stay pending
   }
 
   /* ============================================================
@@ -929,6 +938,16 @@
     const row = document.createElement('div');
     row.className = 'psk-top';
 
+    if (failed) {                              // Plex didn't answer: offer a retry
+      const again = document.createElement('button');
+      again.className = 'psk-gear';
+      again.textContent = '⟳';
+      again.title = 'Plex n\'a pas répondu — réessayer';
+      again.style.color = '#e5a00d';
+      again.addEventListener('click', () => retryNow());
+      row.appendChild(again);
+    }
+
     const wrap = document.createElement('label');
     wrap.className = 'psk-fr';
     const label = document.createElement('span');
@@ -1135,7 +1154,7 @@
             more.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); openVersionMenu(wrap, data); });
             wrap.appendChild(more);
           }
-        } else disable(b, data ? 'aucun fichier lisible' : 'chargement…');
+        } else disable(b, data ? 'aucun fichier lisible' : (failed ? 'Plex n\'a pas répondu — clic sur ⟳ pour réessayer' : 'chargement…'));
         grid.appendChild(wrap);
         continue;
       }
@@ -1499,18 +1518,34 @@ disown</pre>
   /* ============================================================
      BOUCLE PRINCIPALE
      ============================================================ */
+  let failed = false;          // last attempt got nothing out of Plex
+
+  /** Forget what we know and ask Plex again (⟳ button, and once automatically). */
+  function retryNow() {
+    failed = false;
+    serverInfo = null;
+    badServers.clear();
+    delete cache[getRatingKey()];
+    lastKey = null;
+    render(null);
+    update();
+  }
+
   // Typing PSK() in the browser console says what the column is up to.
   window.PSK = () => JSON.stringify({
-    version: "6.0.4",
+    version: "6.1.0",
     key: getRatingKey(),
     lastKey,
     server: !!getServerInfo(),
     data: currentData ? { kind: currentData.kind, versions: (currentData.versions || []).length } : currentData,
     cached: getRatingKey() in cache ? !!cache[getRatingKey()] : 'no',
     collapsed: !!settings.ui.collapsed,
+    failed,
     watching: isWatching(),
     column: (() => { const c = document.getElementById(COL_ID); return c ? (getComputedStyle(c).display + ' @' + Math.round(c.getBoundingClientRect().top)) : 'absent'; })(),
   });
+
+  let autoRetried = false;
 
   function update(retries = 0) {
     const key = getRatingKey();
@@ -1521,6 +1556,7 @@ disown</pre>
     if (!srv && retries < 12) { setTimeout(() => update(retries + 1), 400); return; }
 
     lastKey = key;
+    autoRetried = false;
     if (key in cache) {
       cache[key] ? render(cache[key]) : removeContainer();
       return;
@@ -1533,11 +1569,19 @@ disown</pre>
     resolve(srv, key, data => {
       if (getRatingKey() !== key) return;
       if (!data) {                         // that address answered nothing: try the next one
-        removeContainer();
-        if (dropServerInfo()) { delete cache[key]; lastKey = null; update(); }
-        else cache[key] = null;
+        if (dropServerInfo()) { delete cache[key]; lastKey = null; update(); return; }
+        // no address left: say so rather than staying greyed out for ever,
+        // and give Plex one more chance a few seconds later.
+        failed = true;
+        delete cache[key];
+        render(null);
+        if (!autoRetried) {
+          autoRetried = true;
+          setTimeout(() => { if (failed && getRatingKey() === key) retryNow(); }, 5000);
+        }
         return;
       }
+      failed = false;
       cache[key] = data;
       render(data);
     });
