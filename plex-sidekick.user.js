@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex Sidekick 🔗▶️
 // @namespace    pyro.plex.sidekick
-// @version      6.1.0
+// @version      6.1.1
 // @description  Ton copilote Plex Web : boutons (avec logos) vers 20+ services (TMDB, IMDb, Letterboxd, JustWatch, Blu-ray.com, LDDb, DVDCompare, Criterion…) + lecture directe dans le lecteur de ton choix (IINA, Infuse, mpv, VLC, PotPlayer) avec choix de la version (4K, 1080p…) + épisode suivant + copie de l'URL directe. Colonne réductible, 7 styles dont des icônes compactes (cercles / petits carrés).
 // @author       Pyro
 // @license      MIT
@@ -16,6 +16,7 @@
 // @connect      localhost
 // @connect      127.0.0.1
 // @connect      *
+// @icon         https://watch.plex.tv/icons/favicon.ico
 // @run-at       document-idle
 // @downloadURL  https://raw.githubusercontent.com/PyroDzeus/userscripts/main/plex-sidekick.user.js
 // @updateURL    https://raw.githubusercontent.com/PyroDzeus/userscripts/main/plex-sidekick.user.js
