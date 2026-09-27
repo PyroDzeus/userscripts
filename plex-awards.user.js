@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex Awards 🏆
 // @namespace    plex.awards
-// @version      2.1.4
+// @version      2.1.5
 // @description  IMDb awards & nominations shown directly on the Plex page — ranked by prestige, summarised in one line, expandable, with a link to the title's /awards/ page. Fully bilingual: in French the data itself is pulled from IMDb's French pages.
 // @match        https://app.plex.tv/*
 // @match        http://*/web/*
@@ -15,6 +15,7 @@
 // @connect      imdb.com
 // @connect      api.graphql.imdb.com
 // @connect      *
+// @icon         https://watch.plex.tv/icons/favicon.ico
 // @run-at       document-idle
 // @downloadURL  https://raw.githubusercontent.com/PyroDzeus/userscripts/main/plex-awards.user.js
 // @updateURL    https://raw.githubusercontent.com/PyroDzeus/userscripts/main/plex-awards.user.js
