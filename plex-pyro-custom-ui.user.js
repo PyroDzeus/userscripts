@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex Pyro Custom UI 🔥
 // @namespace    plex-pyro-custom-ui
-// @version      1.5.2
+// @version      1.5.3
 // @author       Pyro
 // @description  Theme Park themes + stable top bar + guaranteed custom logo + flags + Blu-ray/DVD/LaserDisc/4K UHD/WEB badges + studio logos
 // @match        https://app.plex.tv/*
@@ -16,6 +16,7 @@
 // @grant        GM_xmlhttpRequest
 // @connect      en.wikipedia.org
 // @connect      www.wikidata.org
+// @icon         https://watch.plex.tv/icons/favicon.ico
 // @downloadURL  https://raw.githubusercontent.com/PyroDzeus/userscripts/main/plex-pyro-custom-ui.user.js
 // @updateURL    https://raw.githubusercontent.com/PyroDzeus/userscripts/main/plex-pyro-custom-ui.user.js
 // ==/UserScript==
