@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex Wheel 🎡
 // @namespace    pyro.plex.wheel
-// @version      1.0
+// @version      1.1
 // @author       Pyro
 // @description  Roue de la chance intégrée à Plex Web : tire un titre au hasard dans la vue affichée (bibliothèque avec filtres, collection, watchlist, playlist). Animation dans la page, ouverture directe de la fiche, copie de la liste.
 // @match        https://app.plex.tv/*
@@ -14,6 +14,7 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @connect      *
+// @icon         https://watch.plex.tv/icons/favicon.ico
 // @run-at       document-idle
 // @downloadURL  https://raw.githubusercontent.com/PyroDzeus/userscripts/main/plex-wheel.user.js
 // @updateURL    https://raw.githubusercontent.com/PyroDzeus/userscripts/main/plex-wheel.user.js
