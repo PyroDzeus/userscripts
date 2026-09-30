@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Plex Pyro Custom UI 🔥
 // @namespace    plex-pyro-custom-ui
-// @version      1.5.3
+// @version      1.6.0
 // @author       Pyro
-// @description  Theme Park themes + stable top bar + guaranteed custom logo + flags + Blu-ray/DVD/LaserDisc/4K UHD/WEB badges + studio logos
+// @description  Theme Park themes (live picker) + stable top bar + guaranteed custom logo + flags + Blu-ray/DVD/LaserDisc/4K UHD/WEB badges + studio logos
 // @match        https://app.plex.tv/*
 // @match        http://*/web/*
 // @match        https://*/web/*
@@ -14,6 +14,9 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_xmlhttpRequest
+// @grant        GM_addValueChangeListener
+// @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
 // @connect      en.wikipedia.org
 // @connect      www.wikidata.org
 // @icon         https://watch.plex.tv/icons/favicon.ico
@@ -33,24 +36,47 @@
 
 /* ============================================================
    THEME SWITCH (CHANGE ONLY THIS)
+   ------------------------------------------------------------
+   THEME_NAME is only the default until you pick one live with
+   the 🎨 pill (bottom-left), Alt+Shift+T or the Violentmonkey
+   menu. Your pick is remembered.
    ============================================================ */
 
 const THEME_NAME = "spacegray";
 // aquamarine | dark | dracula | hotline | hotpink
 // organizr | overseerr | spacegray | plex | nord | maroon
+// default (= stock Plex, no theme.park)
 
+const TP_CSS = "https://theme-park.dev/css/base/plex/";
+
+// bg / acc = each theme's --main-bg-color / --accent-color,
+// only used to paint the picker swatches.
 const THEMES = {
-  aquamarine:   "https://theme-park.dev/css/base/plex/aquamarine.css",
-  dark:         "https://theme-park.dev/css/base/plex/dark.css",
-  dracula:      "https://theme-park.dev/css/base/plex/dracula.css",
-  hotline:      "https://theme-park.dev/css/base/plex/hotline.css",
-  hotpink:      "https://theme-park.dev/css/base/plex/hotpink.css",
-  organizr:     "https://theme-park.dev/css/base/plex/organizr.css",
-  overseerr:    "https://theme-park.dev/css/base/plex/overseerr.css",
-  spacegray:    "https://theme-park.dev/css/base/plex/space-gray.css",
-  plex:         "https://theme-park.dev/css/base/plex/plex.css",
-  nord:         "https://theme-park.dev/css/base/plex/nord.css",
-  maroon:       "https://theme-park.dev/css/base/plex/maroon.css"
+  aquamarine: { label: "Aquamarine", url: TP_CSS + "aquamarine.css", acc: "18,175,160",
+                bg: "radial-gradient(ellipse at center, #47918a 0%, #0b3161 100%)" },
+  hotline:    { label: "Hotline",    url: TP_CSS + "hotline.css",    acc: "249,141,201",
+                bg: "linear-gradient(0deg, rgba(247,101,184,1) 0%, rgb(21,95,165) 100%)" },
+  hotpink:    { label: "Hotpink",    url: TP_CSS + "hotpink.css",    acc: "251,63,98",
+                bg: "linear-gradient(45deg, #fb3f62 0%, #204c80 37%, #004249 97%)" },
+  dracula:    { label: "Dracula",    url: TP_CSS + "dracula.css",    acc: "80,250,123",
+                bg: "#282a36" },
+  dark:       { label: "Dark",       url: TP_CSS + "dark.css",       acc: "170,170,170",
+                bg: "radial-gradient(circle, #3a3a3a, #2d2d2d, #202020, #141414, #000000)" },
+  organizr:   { label: "Organizr",   url: TP_CSS + "organizr.css",   acc: "44,171,227",
+                bg: "#1f1f1f" },
+  spacegray:  { label: "Space Gray", url: TP_CSS + "space-gray.css", acc: "129,166,183",
+                bg: "radial-gradient(ellipse at center, rgba(87,108,117,1) 0%, rgba(37,50,55,1) 100.2%)" },
+  overseerr:  { label: "Overseerr",  url: TP_CSS + "overseerr.css",  acc: "167,139,250",
+                bg: "linear-gradient(360deg, hsl(221,39%,11%) 65%, hsl(215,28%,17%) 100%)" },
+  plex:       { label: "Plex",       url: TP_CSS + "plex.css",       acc: "229,160,13",
+                bg: "radial-gradient(circle farthest-side at 0% 100%, rgb(47,47,47) 0%, rgba(47,47,47,0) 100%)," +
+                    "radial-gradient(circle farthest-side at 100% 100%, rgb(63,63,63) 0%, rgba(63,63,63,0) 100%)," +
+                    "radial-gradient(circle farthest-side at 100% 0%, rgb(76,76,76) 0%, rgba(76,76,76,0) 100%)," +
+                    "radial-gradient(circle farthest-side at 0% 0%, rgb(58,58,58) 0%, rgba(58,58,58,0) 100%), #000" },
+  nord:       { label: "Nord",       url: TP_CSS + "nord.css",       acc: "121,184,202",
+                bg: "#2e3440" },
+  maroon:     { label: "Maroon",     url: TP_CSS + "maroon.css",     acc: "162,28,101",
+                bg: "radial-gradient(circle farthest-corner at 48.4% 47.5%, rgba(76,21,51,1) 0%, rgba(34,10,37,1) 90%)" }
 };
 
 
@@ -114,8 +140,9 @@ const CUSTOM_LOGO_URL =
 
     const bar = document.createElement("div");
     bar.id = "pyro-logo-bar";
+    // the theme picker pill (further down) slots itself in first: [🎨 theme] [logo URL] [logo 📁]
     bar.style.cssText =
-      "position:fixed;bottom:14px;left:120px;z-index:999999;display:flex;gap:6px;";
+      "position:fixed;bottom:14px;left:14px;z-index:999999;display:flex;gap:6px;align-items:center;";
 
     const style =
       "background:#1c1c1c;color:#eee;border:1px solid #444;border-radius:6px;" +
@@ -170,25 +197,27 @@ const UHD_ICON_FALLBACK =
 
 /* ============================================================
    THEME PARK ADDONS
+   ------------------------------------------------------------
+   Toggled from the theme picker (both on by default). Your
+   custom logo above always wins over plex-alt-logo: it uses
+   !important, the addon doesn't.
    ============================================================ */
 
 const ADDONS = [
-  "https://theme-park.dev/css/addons/plex/overseerr-side-menu/overseerr-side-menu.css",
-  "https://theme-park.dev/css/addons/plex/plex-alt-logo/plex-alt-logo.css"
+  { id: "sideMenu", label: "Overseerr side menu", hint: "Overseerr-style sidebar",
+    url: "https://theme-park.dev/css/addons/plex/overseerr-side-menu/overseerr-side-menu.css" },
+  { id: "altLogo",  label: "Alternative logo",    hint: "theme.park logo slot, under your custom logo",
+    url: "https://theme-park.dev/css/addons/plex/plex-alt-logo/plex-alt-logo.css" }
 ];
-
-const themeUrl = THEMES[THEME_NAME] || THEMES.overseerr;
 
 
 /* ============================================================
    CSS INJECTION (safe)
+   ------------------------------------------------------------
+   Theme + addons are loaded by the THEME PICKER below.
    ============================================================ */
 
 GM_addStyle(`
-@import url("${themeUrl}");
-@import url("${ADDONS[0]}");
-@import url("${ADDONS[1]}");
-
 /* Our injected logo image */
 .plex-custom-logo-img {
   height: 32px !important;
@@ -235,58 +264,470 @@ GM_addStyle(`
 
 
 /* ============================================================
-   THEME SWITCHER (ADD-ON — ne touche à rien au-dessus)
+   THEME PICKER (replaces the old <select>)
+   ------------------------------------------------------------
+   · Open it with the 🎨 pill in the bottom-left bar,
+     Alt+Shift+T, or the Violentmonkey menu. Your pick is saved
+     and every open Plex tab follows it.
+   · Theme + addon sheets sit at the very end of the page, after
+     Plex's own CSS (including chunks Plex loads later), and are
+     swapped only once the new CSS has loaded: no flash.
+   · The pill and panel live in Shadow DOM, so theme CSS can't
+     restyle them and the flag/badge scanner never walks in.
    ============================================================ */
 
 (function () {
-  const STORE_KEY = "pyroThemeOverride";
-  let overrideStyle = null;
+  const THEME_KEY  = "pyroThemeOverride";   // same key as the old <select>: your saved theme carries over
+  const ADDON_KEY  = "pyroThemeAddons";
+  const SHEET_ATTR = "data-pyro-themepark";
+  const HOTKEY     = "Alt+Shift+T";
+  const isHotkey = e => e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === "KeyT";
 
-  // applique un thème PAR-DESSUS le GM_addStyle (même @import, donc partout)
-  function applyOverride(name) {
-    if (!THEMES[name]) return;
-    if (!overrideStyle) {
-      overrideStyle = document.createElement("style");
-      overrideStyle.id = "pyro-theme-override";
-      document.head.appendChild(overrideStyle); // après GM_addStyle => priorité
-    }
-    overrideStyle.textContent = `@import url("${THEMES[name]}");`;
-    GM_setValue(STORE_KEY, name);
+  const ALL = [
+    ...Object.entries(THEMES).map(([id, t]) => ({ id, ...t })),
+    { id: "default", label: "Default", url: null, acc: "229,160,13", hint: "Stock Plex, no theme.park",
+      bg: "repeating-linear-gradient(135deg, #1f1f1f 0 9px, #272727 9px 18px)" }
+  ];
+  const byId = id => ALL.find(t => t.id === id) || ALL.find(t => t.id === THEME_NAME) || ALL[0];
+
+  const readTheme  = v => byId(v || THEME_NAME).id;
+  const readAddons = v => Object.fromEntries(ADDONS.map(a => [a.id, !(v && typeof v === "object" && v[a.id] === false)]));
+  let theme  = readTheme(GM_getValue(THEME_KEY, null));
+  let addons = readAddons(GM_getValue(ADDON_KEY, null));
+
+
+  /* ---------- stylesheets ---------- */
+
+  // "Default" = stock Plex: no theme.park at all, addons included.
+  function wantedSheets() {
+    const t = byId(theme);
+    if (!t.url) return [];
+    return [t.url, ...ADDONS.filter(a => addons[a.id]).map(a => a.url)];
   }
 
-  function build() {
-    if (document.getElementById("pyro-theme-switcher")) return;
-
-    const sel = document.createElement("select");
-    sel.id = "pyro-theme-switcher";
-    sel.style.cssText =
-      "position:fixed;bottom:14px;left:14px;z-index:999999;" +
-      "background:#1c1c1c;color:#eee;border:1px solid #444;border-radius:6px;" +
-      "padding:4px 8px;font:600 12px -apple-system,Helvetica,Arial,sans-serif;" +
-      "cursor:pointer;outline:none;opacity:.3;transition:opacity .15s;" +
-      "box-shadow:0 2px 8px rgba(0,0,0,.4);";
-    sel.addEventListener("mouseenter", () => (sel.style.opacity = "1"));
-    sel.addEventListener("mouseleave", () => (sel.style.opacity = ".3"));
-
-    const current = GM_getValue(STORE_KEY, null) || THEME_NAME;
-    Object.keys(THEMES).forEach(name => {
-      const o = document.createElement("option");
-      o.value = name;
-      o.textContent = name;
-      if (name === current) o.selected = true;
-      sel.appendChild(o);
+  // Fresh <link>s go at the very end of <html> (after <body>, so they win the cascade);
+  // the previous ones are removed only once the new ones have loaded.
+  let mountSeq = 0;
+  function mountSheets() {
+    const root = document.documentElement;
+    const seq = ++mountSeq;
+    const stale = [...root.querySelectorAll(`link[${SHEET_ATTR}]`)];
+    const loads = wantedSheets().map((href, i) => {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = href;
+      link.setAttribute(SHEET_ATTR, String(i));
+      const done = new Promise(res => {
+        link.addEventListener("load", () => res(true), { once: true });
+        link.addEventListener("error", () => { console.warn(`[Pyro UI] couldn't load ${href}`); res(false); }, { once: true });
+      });
+      root.appendChild(link);
+      return done;
     });
-
-    sel.addEventListener("change", () => applyOverride(sel.value));
-    document.body.appendChild(sel);
+    return Promise.all(loads).then(results => {
+      if (seq === mountSeq) stale.forEach(n => n.remove());   // a newer mount cleans up otherwise
+      return results.every(Boolean);
+    });
   }
 
-  // recharge le thème mémorisé (sinon le défaut du GM_addStyle reste)
-  const saved = GM_getValue(STORE_KEY, null);
-  if (saved && saved !== THEME_NAME) applyOverride(saved);
+  // True when one of Plex's own stylesheets (in <head>/<body>) ended up after ours.
+  // Styles other extensions put straight under <html> (Stylus, Dark Reader…) are left
+  // alone on purpose, so the two never fight over who's last.
+  function sheetsNeedReorder() {
+    const ours = document.querySelector(`link[${SHEET_ATTR}]`);
+    if (!ours) return wantedSheets().length > 0;
+    const nodes = document.querySelectorAll('link[rel~="stylesheet"], style');
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const n = nodes[i];
+      if (n.hasAttribute(SHEET_ATTR) || n.parentNode === document.documentElement) continue;
+      return !!(ours.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }
+    return false;
+  }
 
-  if (document.body) build();
-  else window.addEventListener("DOMContentLoaded", build);
+  const reorders = [];
+  function reorderAllowed() {             // safety valve against reorder loops
+    const now = Date.now();
+    while (reorders.length && now - reorders[0] > 10000) reorders.shift();
+    if (reorders.length >= 15) return false;
+    reorders.push(now);
+    return true;
+  }
+
+
+  /* ---------- actions ---------- */
+
+  let applyToken = 0;
+  function apply() {
+    const token = ++applyToken;
+    setBusy(true);
+    refresh();
+    mountSheets().then(ok => {
+      if (token !== applyToken) return;
+      setBusy(false);
+      showStatus(ok ? "" : "Couldn't load the theme from theme-park.dev. Check your connection.");
+    });
+  }
+
+  function setTheme(id) {
+    if (id === theme) return;
+    theme = byId(id).id;
+    GM_setValue(THEME_KEY, theme);
+    apply();
+  }
+
+  function setAddon(id, on) {
+    addons = { ...addons, [id]: !!on };
+    GM_setValue(ADDON_KEY, addons);
+    apply();
+  }
+
+  function cycle(dir) {
+    const i = ALL.findIndex(t => t.id === theme);
+    setTheme(ALL[(i + dir + ALL.length) % ALL.length].id);
+  }
+
+
+  /* ---------- the pill (lives in #pyro-logo-bar) ---------- */
+
+  const PILL_CSS = `
+    :host { display: inline-flex; }
+    :host([data-mode="float"]) { position: fixed; bottom: 14px; left: 14px; z-index: 999999; }
+    button {
+      all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px;
+      background: #1c1c1c; color: #eee; border: 1px solid #444; border-radius: 6px;
+      padding: 4px 9px 4px 6px; font: 600 12px -apple-system, Helvetica, Arial, sans-serif;
+      cursor: pointer; opacity: .3; transition: opacity .15s; box-shadow: 0 2px 8px rgba(0,0,0,.4);
+      white-space: nowrap;
+    }
+    button:hover, button:focus-visible, button[aria-expanded="true"] { opacity: 1; }
+    button:focus-visible { outline: 2px solid #eee; outline-offset: 2px; }
+    .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(255,255,255,.35); }
+  `;
+
+  let pillHost = null, pill = null, pillDot = null, pillLabel = null;
+
+  function buildPill() {
+    pillHost = document.createElement("span");
+    pillHost.id = "pyro-theme-pill";
+    pillHost.dataset.pyroIgnore = "";
+    const root = pillHost.attachShadow({ mode: "open" });
+    root.innerHTML = `<style>${PILL_CSS}</style>
+      <button type="button" aria-haspopup="dialog" aria-expanded="false"><span class="dot"></span><span class="label"></span></button>`;
+    pill = root.querySelector("button");
+    pillDot = root.querySelector(".dot");
+    pillLabel = root.querySelector(".label");
+    pill.addEventListener("click", e => { e.stopPropagation(); togglePanel(); });
+    refresh();
+  }
+
+  // First item of the logo bar when it's there, floating bottom-left otherwise.
+  function ensurePill() {
+    if (!document.body) return;
+    if (!pillHost) buildPill();
+    const bar = document.getElementById("pyro-logo-bar");
+    if (bar) {
+      if (pillHost.parentNode !== bar) { bar.prepend(pillHost); pillHost.dataset.mode = "bar"; }
+    } else if (pillHost.parentNode !== document.body) {
+      document.body.appendChild(pillHost);
+      pillHost.dataset.mode = "float";
+    }
+  }
+
+
+  /* ---------- the panel ---------- */
+
+  const PANEL_CSS = `
+    :host { all: initial; }
+    *, *::before, *::after { box-sizing: border-box; }
+
+    .panel {
+      --acc: 229,160,13;
+      position: fixed; z-index: 2147483000;
+      width: min(440px, calc(100vw - 16px)); max-height: calc(100vh - 32px); overflow: auto;
+      padding: 14px; border-radius: 14px;
+      background: rgba(18,20,26,.94);
+      -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2);
+      color: #e8eaed; font: 13px/1.45 -apple-system, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      box-shadow: 0 24px 60px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.08);
+      opacity: 0; visibility: hidden; transform: translateY(6px) scale(.985); transform-origin: bottom left;
+      transition: opacity .16s ease, transform .16s ease, visibility 0s linear .16s;
+    }
+    .panel.open { opacity: 1; visibility: visible; transform: none; transition: opacity .16s ease, transform .16s ease; }
+
+    .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .title { font-weight: 700; font-size: 15px; letter-spacing: .01em; }
+    .title span { color: rgb(var(--acc)); }
+    .sub { color: #9aa0a6; font-size: 12px; }
+    .x {
+      all: unset; cursor: pointer; width: 28px; height: 28px; border-radius: 8px;
+      display: grid; place-items: center; font-size: 20px; line-height: 1; color: #9aa0a6;
+    }
+    .x:hover { background: rgba(255,255,255,.08); color: #fff; }
+    .x:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+
+    .section { margin: 14px 0 8px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #8b9097; }
+    .section em { font-style: normal; text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 4px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+    .tile {
+      all: unset; position: relative; height: 56px; border-radius: 6px; cursor: pointer;
+      display: grid; place-items: center; overflow: hidden;
+      background: var(--bg); color: #f2f2f2;
+      font: 400 26px/1 "Brush Script MT", "Segoe Script", "Snell Roundhand", cursive;
+      text-shadow: 0 2px 3px rgba(0,0,0,.65), 0 0 1px rgba(0,0,0,.8);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.07);
+      transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
+    }
+    .tile:hover { transform: translateY(-1px); filter: brightness(1.08); box-shadow: inset 0 0 0 1px rgba(255,255,255,.22); }
+    .tile:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+    .tile[aria-pressed="true"] { box-shadow: 0 0 0 2px rgb(var(--tile-acc)), inset 0 0 0 1px rgba(255,255,255,.2); }
+    .tile[aria-pressed="true"]::after {
+      content: "✓"; position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 50%;
+      display: grid; place-items: center; background: rgb(var(--tile-acc)); color: #111;
+      font: 700 11px/1 system-ui, sans-serif; text-shadow: none;
+    }
+    .panel[data-busy] .tile[aria-pressed="true"]::before {
+      content: ""; position: absolute; inset: 0;
+      background: linear-gradient(100deg, transparent 20%, rgba(255,255,255,.2) 50%, transparent 80%);
+      background-size: 200% 100%; animation: shimmer .9s linear infinite;
+    }
+    @keyframes shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+
+    .addons { display: grid; gap: 6px; transition: opacity .15s; }
+    .addons[data-off] { opacity: .4; pointer-events: none; }
+    .row {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 10px 12px; border-radius: 8px; background: rgba(255,255,255,.04); cursor: pointer;
+    }
+    .row:hover { background: rgba(255,255,255,.07); }
+    .row b { display: block; font-weight: 600; }
+    .row small { display: block; color: #9aa0a6; font-size: 12px; }
+    .switch {
+      appearance: none; -webkit-appearance: none; margin: 0; flex: none; position: relative; cursor: pointer;
+      width: 36px; height: 20px; border-radius: 999px; background: rgba(255,255,255,.18); transition: background .15s ease;
+    }
+    .switch::after {
+      content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+      background: #fff; transition: transform .15s ease;
+    }
+    .switch:checked { background: rgb(var(--acc)); }
+    .switch:checked::after { transform: translateX(16px); }
+    .switch:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+    .status { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: rgba(255,82,82,.12); color: #ff9a9a; font-size: 12px; }
+    .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; color: #8b9097; font-size: 12px; }
+    .foot a { color: inherit; text-decoration: none; }
+    .foot a:hover { color: #fff; }
+    kbd {
+      font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 2px 5px; border-radius: 4px;
+      background: rgba(255,255,255,.08); box-shadow: inset 0 -1px 0 rgba(255,255,255,.08); color: #c9ccd1;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .panel, .tile, .switch, .switch::after, .addons { transition: none; }
+      .panel[data-busy] .tile[aria-pressed="true"]::before { animation: none; }
+    }
+  `;
+
+  let panelHost = null, panel = null, isOpen = false;
+
+  function buildPanel() {
+    panelHost = document.createElement("div");
+    panelHost.id = "pyro-theme-panel";
+    panelHost.dataset.pyroIgnore = "";
+    const root = panelHost.attachShadow({ mode: "open" });
+    const keys = HOTKEY.split("+").map(k => `<kbd>${k}</kbd>`).join("+");
+
+    root.innerHTML = `<style>${PANEL_CSS}</style>
+      <div class="panel" role="dialog" aria-label="theme.park themes for Plex">
+        <div class="head">
+          <div>
+            <div class="title">theme<span>.</span>park</div>
+            <div class="sub">Plex · ${Object.keys(THEMES).length} themes</div>
+          </div>
+          <button class="x" type="button" aria-label="Close">×</button>
+        </div>
+        <div class="grid"></div>
+        <div class="section">Addons<em class="off-note" hidden>· off with Default</em></div>
+        <div class="addons"></div>
+        <div class="status" hidden></div>
+        <div class="foot">
+          <span>${keys}</span>
+          <a href="https://docs.theme-park.dev/themes/plex/" target="_blank" rel="noopener noreferrer">theme.park docs ↗</a>
+        </div>
+      </div>`;
+
+    panel = root.querySelector(".panel");
+
+    const grid = root.querySelector(".grid");
+    for (const t of ALL) {                       // 11 themes + Default = 6 full rows
+      const tile = document.createElement("button");
+      tile.type = "button";
+      tile.className = "tile";
+      tile.dataset.id = t.id;
+      tile.textContent = t.label;
+      tile.title = t.hint || `${t.label} theme`;
+      tile.style.setProperty("--bg", t.bg);
+      tile.style.setProperty("--tile-acc", t.acc);
+      tile.addEventListener("click", () => setTheme(t.id));
+      grid.appendChild(tile);
+    }
+
+    const box = root.querySelector(".addons");
+    for (const a of ADDONS) {
+      const row = document.createElement("label");
+      row.className = "row";
+      const txt = document.createElement("span");
+      const b = document.createElement("b"); b.textContent = a.label;
+      const s = document.createElement("small"); s.textContent = a.hint;
+      txt.append(b, s);
+      const sw = document.createElement("input");
+      sw.type = "checkbox";
+      sw.className = "switch";
+      sw.dataset.addon = a.id;
+      sw.addEventListener("change", () => setAddon(a.id, sw.checked));
+      row.append(txt, sw);
+      box.appendChild(row);
+    }
+
+    root.querySelector(".x").addEventListener("click", closePanel);
+  }
+
+  // Anchored to the pill: opens upward from the bottom-left bar.
+  function positionPanel() {
+    const s = panel.style;
+    s.top = s.bottom = s.left = s.right = "";
+    const r = pillHost && pillHost.isConnected ? pillHost.getBoundingClientRect() : null;
+    if (!r || !r.width) { s.bottom = "52px"; s.left = "14px"; s.maxHeight = "calc(100vh - 68px)"; return; }
+    const up = r.top > innerHeight / 2, left = r.left + r.width / 2 < innerWidth / 2;
+    if (left) s.left = `${Math.max(8, r.left)}px`;
+    else      s.right = `${Math.max(8, innerWidth - r.right)}px`;
+    if (up) { s.bottom = `${innerHeight - r.top + 10}px`; s.maxHeight = `${Math.max(200, r.top - 26)}px`; }
+    else    { s.top = `${r.bottom + 10}px`; s.maxHeight = `${Math.max(200, innerHeight - r.bottom - 26)}px`; }
+    s.transformOrigin = `${up ? "bottom" : "top"} ${left ? "left" : "right"}`;
+  }
+
+  function openPanel() {
+    if (!document.body) return;
+    if (!panelHost) buildPanel();
+    if (!panelHost.isConnected) document.body.appendChild(panelHost);
+    refresh();
+    positionPanel();
+    panel.classList.add("open");
+    isOpen = true;
+    if (pill) pill.setAttribute("aria-expanded", "true");
+    requestAnimationFrame(() => {
+      const active = panel.querySelector('.tile[aria-pressed="true"]');
+      if (active) active.focus({ preventScroll: true });
+    });
+  }
+
+  function closePanel() {
+    if (!panel) return;
+    panel.classList.remove("open");
+    isOpen = false;
+    if (pill) pill.setAttribute("aria-expanded", "false");
+  }
+
+  const togglePanel = () => (isOpen ? closePanel() : openPanel());
+
+  function setBusy(on) { if (panel) panel.toggleAttribute("data-busy", !!on); }
+
+  function showStatus(msg) {
+    if (!panel) return;
+    const el = panel.querySelector(".status");
+    el.textContent = msg;
+    el.hidden = !msg;
+  }
+
+
+  /* ---------- Violentmonkey menu ---------- */
+
+  let menuIds = [], menuState = "";
+  function buildMenu() {
+    if (typeof GM_registerMenuCommand !== "function") return;
+    const t = byId(theme);
+    if (menuState === t.id) return;
+    menuState = t.id;
+    if (typeof GM_unregisterMenuCommand === "function") menuIds.forEach(id => { try { GM_unregisterMenuCommand(id); } catch (_) {} });
+    menuIds = [
+      GM_registerMenuCommand(`🎨 Theme picker (current: ${t.label})`, () => openPanel()),
+      GM_registerMenuCommand("⏭ Next theme", () => cycle(1)),
+      GM_registerMenuCommand("⏮ Previous theme", () => cycle(-1))
+    ];
+  }
+
+
+  /* ---------- keep every bit of UI in sync ---------- */
+
+  function refresh() {
+    const t = byId(theme);
+    if (pill) {
+      pillDot.style.background = t.bg;
+      pillLabel.textContent = t.label;
+      pill.title = `Theme: ${t.label} (${HOTKEY})`;
+    }
+    if (panel) {
+      panel.style.setProperty("--acc", t.acc);
+      panel.querySelectorAll(".tile").forEach(el => el.setAttribute("aria-pressed", String(el.dataset.id === t.id)));
+      panel.querySelectorAll(".switch").forEach(sw => { sw.checked = !!addons[sw.dataset.addon]; sw.disabled = !t.url; });
+      panel.querySelector(".addons").toggleAttribute("data-off", !t.url);
+      panel.querySelector(".off-note").hidden = !!t.url;
+    }
+    buildMenu();
+  }
+
+
+  /* ---------- boot ---------- */
+
+  let queued = false;
+  function tick() {
+    queued = false;
+    if (sheetsNeedReorder() && reorderAllowed()) mountSheets();
+    ensurePill();
+  }
+  const queueTick = () => { if (!queued) { queued = true; setTimeout(tick, 25); } };
+
+  mountSheets();
+  ensurePill();
+
+  // Plex mutates the DOM constantly, so only react to what matters here:
+  // new stylesheets, the logo bar showing up, or the pill being thrown out.
+  new MutationObserver(records => {
+    if (pillHost && !pillHost.isConnected) return queueTick();
+    for (const r of records) for (const n of r.addedNodes) {
+      if (n.nodeName === "LINK" || n.nodeName === "STYLE" || n.id === "pyro-logo-bar") {
+        if (n.nodeType === 1 && n.hasAttribute(SHEET_ATTR)) continue;
+        return queueTick();
+      }
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", tick, { once: true });
+  window.addEventListener("load", tick, { once: true });
+
+  window.addEventListener("keydown", e => {
+    if (isHotkey(e)) { e.preventDefault(); e.stopPropagation(); togglePanel(); }
+    else if (e.key === "Escape" && isOpen) { e.stopPropagation(); closePanel(); }   // don't also close a Plex dialog
+  }, true);
+
+  window.addEventListener("pointerdown", e => {
+    if (!isOpen) return;
+    const path = e.composedPath();
+    if (path.includes(panelHost) || path.includes(pillHost)) return;
+    closePanel();
+  }, true);
+
+  window.addEventListener("resize", () => { if (isOpen) positionPanel(); });
+
+  // Pick a theme in one Plex tab → the other open tabs follow.
+  if (typeof GM_addValueChangeListener === "function") {
+    GM_addValueChangeListener(THEME_KEY, (_k, _o, v, remote) => { if (remote) { theme = readTheme(v); apply(); } });
+    GM_addValueChangeListener(ADDON_KEY, (_k, _o, v, remote) => { if (remote) { addons = readAddons(v); apply(); } });
+  }
+
+  refresh();
 })();
 
 
@@ -308,7 +749,7 @@ GM_addStyle(`
     "#paw-card",                                // Plex Awards
     "#psk-col", "#psk-panel", ".psk-menu",      // Plex Sidekick
     "#pwh-host", "#pwh-btn",                    // Plex Wheel
-    "#pyro-logo-bar", "#pyro-theme-switcher",   // this script's own controls
+    "#pyro-logo-bar", "#pyro-theme-pill", "#pyro-theme-panel",   // this script's own controls
     "pre", "code", "textarea", "input", "select", "script", "style", "[contenteditable]"
   ].join(",");
 
