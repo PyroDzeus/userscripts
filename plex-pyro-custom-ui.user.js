@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Plex Pyro Custom UI 🔥
 // @namespace    plex-pyro-custom-ui
-// @version      1.6.0
+// @version      1.9.3
 // @author       Pyro
-// @description  Theme Park themes (live picker) + stable top bar + guaranteed custom logo + flags + Blu-ray/DVD/LaserDisc/4K UHD/WEB badges + studio logos
+// @description  Theme Park themes + 3 modern interfaces (Aurora, PlexFlix, Prime) + stable top bar + guaranteed custom logo + flags + Blu-ray/DVD/LaserDisc/4K UHD/WEB badges + studio logos
 // @match        https://app.plex.tv/*
 // @match        http://*/web/*
 // @match        https://*/web/*
@@ -264,6 +264,640 @@ GM_addStyle(`
 
 
 /* ============================================================
+   INTERFACE SKINS — the modern layouts (picked in the panel)
+   ------------------------------------------------------------
+   theme.park owns the COLOURS; a skin owns the SHAPES and the
+   MOTION: how a poster grows under the cursor, how round the
+   corners are, how the top bar behaves, how the sidebar reads.
+
+   Three skins share one engine, and differ only by the tokens
+   in SKINS below:
+     · Aurora   — calm neutral, 4px tiles, white ring   (Disney+)
+     · PlexFlix — near-black, bigger zoom, red accent    (Netflix)
+     · Prime    — deep navy, very round, blue accent     (Prime Video)
+   Their numbers were read out of saved sessions of those sites,
+   so the proportions feel right rather than invented. No logo,
+   font file or stylesheet of theirs is shipped here.
+
+   With a theme.park theme on, a skin leaves the palette alone
+   and borrows the theme's accent. With "Default" (no theme.park)
+   it also paints its own background, like a standalone script.
+
+   The hover-zoom fix, in one line: a Plex row clips at its
+   padding box, so symmetric padding plus an equal negative
+   margin gives the poster room to grow without touching
+   `overflow` — which would have broken the scroll wheel.
+   ============================================================ */
+
+const BLEED = 28;          // px of clip-free room added above/below a row
+
+const SKINS = {
+  aurora: {
+    bg: "#17171B", nav: "#0b0b0ee6", text: "#dbdcde", textSoft: "#a9aeb5",
+    // Disney+'s loader cyan, sampled from the site itself (their CSS keeps the
+    // brand blue #0072d2 for links, but the interface reads as this cyan).
+    accent: "#61d3e5", accentHover: "color-mix(in srgb, #61d3e5 86%, white)",
+    accentPress: "color-mix(in srgb, #61d3e5 86%, black)",
+    rTile: "4px", rPanel: "12px", rButton: "999px",
+    scale: 1.06, ring: "#61d3e5", ringW: "2px",
+    dur: ".30s", durS: ".20s", ease: "ease-in-out",
+    shadow: "0 16px 26px #000000a8, 0 0 20px #61d3e52e", hairline: "#ffffff1a",
+    font: 'PlexCircular, "Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    sidebar: "#00000038", sidebarOpen: "#14141ae6", blur: "28px"
+  },
+  netflix: {
+    bg: "#141414", nav: "#141414f2", text: "#e5e5e5", textSoft: "#b3b3b3",
+    // #e50914 and #b9090b both come straight from Netflix's own stylesheet.
+    accent: "#e50914", accentHover: "color-mix(in srgb, #e50914 88%, white)", accentPress: "#b9090b",
+    rTile: "4px", rPanel: "4px", rButton: "4px",
+    scale: 1.12, ring: "#e50914", ringW: "2px",
+    dur: ".35s", durS: ".15s", ease: "cubic-bezier(.86,0,.07,1)",
+    shadow: "0 18px 34px #000000d9, 0 0 22px #e5091436", hairline: "#ffffff14",
+    font: '"Netflix Sans", "Helvetica Neue", Helvetica, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif',
+    sidebar: "#00000059", sidebarOpen: "#141414f7", blur: "18px"
+  },
+  prime: {
+    bg: "#00050d", nav: "#00050de6", text: "#c4cacf", textSoft: "#8197a4",
+    // #1a98ff is Prime Video's focus ring, #0070f0 its pressed blue.
+    accent: "#1a98ff", accentHover: "color-mix(in srgb, #1a98ff 88%, white)", accentPress: "#0070f0",
+    rTile: "8px", rPanel: "16px", rButton: "10000px",
+    scale: 1.05, ring: "#1a98ff", ringW: "2px",
+    dur: ".30s", durS: ".20s", ease: "ease-in-out",
+    shadow: "0 18px 30px #000000a6, 0 0 22px #1a98ff33", hairline: "#ffffff1f",
+    font: '"Amazon Ember", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
+    sidebar: "#191e2599", sidebarOpen: "#191e25f2", blur: "24px"
+  }
+};
+
+/**
+ * @param id          skin key in SKINS
+ * @param accent      colour for rings, markers and tabs
+ * @param ownPalette  true = the skin paints the background too
+ *                    (only when no theme.park sheet is loaded)
+ */
+function skinCss(id, accent, ownPalette) {
+  const k = SKINS[id] || SKINS.aurora;
+  const flix = id === "netflix";
+  const prime = id === "prime";
+
+  return `
+:root {
+  --ax-bg:       ${k.bg};
+  --ax-accent:   ${accent};
+  --ax-r-tile:   ${k.rTile};
+  --ax-r-panel:  ${k.rPanel};
+  --ax-r-btn:    ${k.rButton};
+  --ax-bleed:    ${BLEED}px;
+  --ax-scale:    ${k.scale};
+  --ax-ring-w:   ${k.ringW};
+  --ax-dur:      ${k.dur};
+  --ax-dur-s:    ${k.durS};
+  --ax-ease:     ${k.ease};
+  --ax-ease-out: cubic-bezier(0, 0, .5, 1);
+}
+
+${ownPalette ? `
+/* No theme.park sheet to respect: the skin owns the palette.
+   Plex's gold reaches the page two ways — through its design tokens, and
+   hard-coded in a few components — so both are covered here, otherwise the
+   yellow keeps showing up next to the skin's red or blue. */
+:root {
+  --color-accent:                   var(--ax-accent);
+  --color-accent-hover:             ${k.accentHover};
+  --color-accent-press:             ${k.accentPress};
+  --color-background-accent:        var(--ax-accent);
+  --color-background-accent-hover:  ${k.accentHover};
+  --color-background-accent-press:  ${k.accentPress};
+  --color-background-accent-subtle: ${k.accent}33;
+  --color-border-accent:            var(--ax-accent);
+  --color-brand-accent:             var(--ax-accent);
+  --color-text-accent:              var(--ax-accent);
+  --color-text-accent-hover:        ${k.accentHover};
+  --color-static-yellow:            var(--ax-accent);
+  --color-static-yellow-hover:      ${k.accentHover};
+  --color-primary:                  var(--ax-accent);
+  --color-primary-hover:            ${k.accentHover};
+  --color-focus:                    var(--ax-accent);
+  --accent-color:                   var(--ax-accent);
+  --accent-color-hover:             ${k.accentHover};
+  --brand-color:                    var(--ax-accent);
+  --color-background-modal:  ${k.sidebarOpen};
+  --color-menu:              ${k.sidebarOpen};
+  --color-overlay-background:${k.sidebarOpen};
+}
+html, body { background-color: var(--ax-bg) !important; }
+[class*="FullPageBackground-backgroundContainer-"] { background-color: var(--ax-bg) !important; }
+
+/* The gold spots Plex paints itself: unwatched dots, progress bars,
+   primary buttons, toggles and the live-activity icon. */
+[class*="UnwatchedIndicator"],
+[class*="UnplayedIndicator"],
+[class*="PlayedIndicator"] { background-color: var(--ax-accent) !important; }
+
+[class*="ProgressBar-fill"],
+[class*="ProgressBar-progress"],
+[class*="Progress-fill"],
+[class*="PlayProgress"],
+[class*="MetadataPosterCardProgress"] > div,
+progress::-webkit-progress-value { background-color: var(--ax-accent) !important; }
+
+[class*="Button-primary"],
+[class*="Button-button-"][class*="primary"],
+[class*="ButtonGroup-"] [aria-pressed="true"] {
+  background-color: var(--ax-accent) !important;
+  border-color: var(--ax-accent) !important;
+  color: ${flix || prime ? "#fff" : "#101010"} !important;
+}
+[class*="Button-primary"]:hover,
+[class*="Button-button-"][class*="primary"]:hover { background-color: ${k.accentHover} !important; }
+
+input[type="checkbox"], input[type="radio"], input[type="range"], progress { accent-color: var(--ax-accent); }
+[class*="Toggle-"][class*="checked"],
+[class*="Switch-"][class*="checked"],
+[class*="Checkbox-"][class*="checked"] { background-color: var(--ax-accent) !important; }
+
+[class*="ActivityIndicator-"],
+[class*="Spinner-"] { color: var(--ax-accent) !important; }
+
+/* Text and icons Plex tints gold through its own class, not a token. */
+[class*="-accent-"], [class*="accentColor"] { color: var(--ax-accent) !important; }
+` : ""}
+
+html, body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+[class*="PageHeaderTitle-title-"],
+[class*="VirtualHubScroller-hubScroller-"] h2,
+[class*="HubCellTitle-hubCellTitle-"] { font-family: ${k.font}; }
+
+/* ---- rows: room to zoom, without touching overflow ---- */
+[class*="VirtualHubScroller-hubScroller-"][class*="Scroller-horizontal-"],
+[class*="HubCell-hubScroller-"][class*="Scroller-horizontal-"] {
+  padding-top: var(--ax-bleed);
+  padding-bottom: var(--ax-bleed);
+  margin-top: calc(-1 * var(--ax-bleed));
+  margin-bottom: calc(-1 * var(--ax-bleed));
+}
+[class*="HubCell-hubScroller-"][class*="Scroller-horizontal-"] {
+  padding-bottom: calc(var(--ax-bleed) + 20px);
+  margin-bottom: calc(-1 * var(--ax-bleed));
+}
+[class*="PageContent-pageContentScroller-"][class*="Scroller-vertical-"] { scroll-padding-top: var(--ax-bleed); }
+
+/* The row now overlaps its header, so keep the header clickable. */
+[class*="VirtualHubScroller-hubHeader-"],
+[class*="HubCellHeader-hubCellHeader-"] { margin-bottom: 12px; position: relative; z-index: 2; }
+
+[class*="VirtualHubScroller-hubHeader-"] h2,
+[class*="HubCellTitle-hubCellTitle-"] {
+  font-size: 17px; font-weight: ${flix ? 500 : 600}; letter-spacing: -.01em; color: ${k.text};
+  transition: color var(--ax-dur) var(--ax-ease);
+}
+[class*="VirtualHubScroller-hub-"]:hover [class*="VirtualHubScroller-hubHeader-"] h2,
+[class*="VirtualHubScroller-hub-"]:hover [class*="VirtualHubScroller-hubHeader-"] h2 a,
+[class*="HubCell-hubCell-"]:hover [class*="HubCellTitle-hubCellTitle-"] { color: #fff; }
+
+/* Paging arrows appear with the row, as on the streaming apps. */
+[class*="VirtualHubScroller-hubActions-"],
+[class*="HubCell-hubActions-"] { opacity: 0; transition: opacity var(--ax-dur) var(--ax-ease-out); }
+[class*="VirtualHubScroller-hub-"]:hover [class*="VirtualHubScroller-hubActions-"],
+[class*="VirtualHubScroller-hub-"]:focus-within [class*="VirtualHubScroller-hubActions-"],
+[class*="HubCell-hubCell-"]:hover [class*="HubCell-hubActions-"],
+[class*="HubCell-hubCell-"]:focus-within [class*="HubCell-hubActions-"] { opacity: 1; }
+
+[class*="VirtualHubScroller-hubScrollButton-"],
+[class*="HubCell-hubScrollButton-"] {
+  border-radius: ${flix ? "4px" : "999px"};
+  ${flix ? "background-color: #000000a6;" : ""}
+  transition: background-color var(--ax-dur-s) var(--ax-ease), transform var(--ax-dur-s) var(--ax-ease);
+}
+[class*="VirtualHubScroller-hubScrollButton-"]:hover:not(.isDisabled),
+[class*="HubCell-hubScrollButton-"]:hover:not(.isDisabled) {
+  background-color: ${flix ? "#000000e6" : "#ffffff1a"}; transform: scale(1.12);
+}
+
+/* ---- poster cards ---- */
+[class*="PosterCard-card-"]:not([class*="MetadataPosterCard-card-"]) {
+  border-radius: var(--ax-r-tile);
+  transform: scale(1) translateZ(0);
+  transform-origin: center center;
+  backface-visibility: hidden;
+  box-shadow: inset 0 0 0 1px ${k.hairline};
+  transition: transform var(--ax-dur) var(--ax-ease), box-shadow var(--ax-dur) var(--ax-ease);
+}
+[class*="PosterCard-card-"]:not([class*="MetadataPosterCard-card-"]):hover {
+  transform: scale(var(--ax-scale)) translateZ(0);
+  z-index: 3;
+  box-shadow: inset 0 0 0 1px #ffffff26, ${k.shadow};
+}
+[class*="MetadataSimplePosterCard-image-"],
+[class*="MetadataDirectoryListItem-image-"] { border-radius: var(--ax-r-tile); }
+
+[class*="PosterCard-card-"]:not([class*="MetadataPosterCard-card-"])::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  outline: var(--ax-ring-w) solid ${k.ring}; outline-offset: 0;
+  opacity: 0; pointer-events: none; z-index: 2;
+  transition: opacity var(--ax-dur) ease;
+}
+[class*="PosterCard-card-"]:not([class*="MetadataPosterCard-card-"]):hover::after,
+[class*="PosterCard-card-"]:not([class*="MetadataPosterCard-card-"]):focus-within::after { opacity: 1; }
+
+/* Plex writes will-change on every cell, which makes it a stacking context:
+   the zoomed poster can only rise above its neighbours if the cell rises. */
+[data-testid="cellItem"],
+[class*="VirtualListScroller-scroller-"] > div > [style*="will-change"] { z-index: 0; }
+[data-testid="cellItem"]:has(> [class*="PosterCard-card-"]:hover),
+[data-testid="cellItem"]:has(> [class*="PosterCard-card-"]:focus-within),
+[style*="will-change"]:has(> [class*="PosterCard-card-"]:hover),
+[style*="will-change"]:has(> [class*="PosterCard-card-"]:focus-within) { z-index: 30; }
+
+[class*="MetadataPosterCardTitle-title-"] { transition: color var(--ax-dur) var(--ax-ease); }
+[data-testid="cellItem"]:hover [class*="MetadataPosterCardTitle-title-"] { color: #fff; }
+[data-testid="cellItem"]:hover [class*="MetadataPosterCardTitle-title-"] + [class*="MetadataPosterCardTitle-title-"] { color: ${k.textSoft}; }
+[class*="MetadataPosterCardTitle-title-"] a:hover,
+a[class*="MetadataPosterCardTitle-title-"]:hover { text-decoration: none !important; }
+
+[class*="MetadataDirectoryListItem-image-"] img { opacity: .82; transition: opacity var(--ax-dur) var(--ax-ease); }
+[class*="PosterCard-card-"]:hover [class*="MetadataDirectoryListItem-image-"] img,
+[class*="PosterCard-card-"]:focus-within [class*="MetadataDirectoryListItem-image-"] img { opacity: 1; }
+[class*="MetadataDirectoryListItem-overlayTitle-"] {
+  text-shadow: 0 2px 10px #000000b3, 0 1px 3px #000000e6; letter-spacing: -.01em;
+}
+
+[class*="MetadataPosterCardBadge-badgeBackground-"] {
+  background-color: #000000a6;
+  -webkit-backdrop-filter: blur(12px) saturate(140%); backdrop-filter: blur(12px) saturate(140%);
+  border-radius: ${prime ? "8px" : flix ? "2px" : "999px"};
+  box-shadow: inset 0 0 0 1px #ffffff1f; padding: 3px 8px; min-width: 0;
+}
+[class*="MetadataPosterCardBadge-topRightBadge-"] { top: 6px; right: 6px; }
+[class*="MetadataPosterCard-bottomRightBadge-"]   { bottom: 6px; right: 6px; }
+
+/* ============================================================================
+ *  What tells the three skins apart, beyond the palette
+ *  (values read from the saved sessions of each site)
+ * ========================================================================= */
+${id === "aurora" ? `
+/* Disney+ CTA: white pill, dark label, hover #e9ebf0. Titles stay readable. */
+[class*="Button-primary"],
+[class*="Button-button-"][class*="primary"] {
+  background-color: #f1f2f4 !important; color: #252526 !important;
+  border-radius: 100px !important; font-weight: 600; letter-spacing: .02em;
+}
+[class*="Button-primary"]:hover,
+[class*="Button-button-"][class*="primary"]:hover { background-color: #e9ebf0 !important; }
+[class*="MetadataPosterCardTitle-title-"] { opacity: .88; }
+[data-testid="cellItem"]:hover [class*="MetadataPosterCardTitle-title-"] { opacity: 1; }
+` : ""}
+${flix ? `
+/* Netflix: white Play button with square corners, grey secondary, and poster
+   titles that only appear when the row is hovered. */
+[class*="Button-primary"],
+[class*="Button-button-"][class*="primary"] {
+  background-color: #fff !important; color: #141414 !important;
+  border-radius: 4px !important; font-weight: 700;
+}
+[class*="Button-primary"]:hover,
+[class*="Button-button-"][class*="primary"]:hover { background-color: #e6e6e6 !important; }
+[class*="Button-button-"]:not([class*="primary"]):not([class*="TabButton-"]) {
+  background-color: #6d6d6eb3 !important; color: #fff !important; border-radius: 4px !important;
+}
+[class*="MetadataPosterCardTitle-title-"] {
+  opacity: 0; transition: opacity var(--ax-dur-s) var(--ax-ease);
+}
+[class*="VirtualHubScroller-hub-"]:hover [class*="MetadataPosterCardTitle-title-"],
+[class*="HubCell-hubCell-"]:hover [class*="MetadataPosterCardTitle-title-"],
+[data-testid="cellItem"]:hover [class*="MetadataPosterCardTitle-title-"],
+[class*="PageContent-pageContentScroller-"]:hover [class*="MetadataPosterCardTitle-title-"] { opacity: 1; }
+/* Row paging: tall dark panels at the edges rather than small round buttons. */
+[class*="VirtualHubScroller-hubScrollButton-"],
+[class*="HubCell-hubScrollButton-"] {
+  border-radius: 0 !important; width: 48px !important;
+  background-color: #000000a6 !important;
+}
+[class*="VirtualHubScroller-hubScrollButton-"]:hover:not(.isDisabled),
+[class*="HubCell-hubScrollButton-"]:hover:not(.isDisabled) {
+  background-color: #000000d9 !important; transform: none !important;
+}
+[class*="IconButton-iconButton-"], [class*="IconButton-button-"] {
+  box-shadow: inset 0 0 0 2px #ffffff8c;
+}
+` : ""}
+${prime ? `
+/* Prime Video: everything rounder — pill CTA, 12px chips, circular icon
+   buttons with a thin outline, and a little more air between posters. */
+[class*="Button-primary"],
+[class*="Button-button-"][class*="primary"] {
+  background-color: var(--ax-accent) !important; color: #fff !important;
+  border-radius: 10000px !important; font-weight: 600; padding-left: 18px; padding-right: 18px;
+}
+[class*="Button-primary"]:hover,
+[class*="Button-button-"][class*="primary"]:hover { background-color: ${k.accentHover} !important; }
+[class*="Button-button-"]:not([class*="primary"]):not([class*="TabButton-"]) {
+  background-color: #ffffff1a !important; border-radius: 10000px !important;
+}
+[class*="IconButton-iconButton-"], [class*="IconButton-button-"] {
+  box-shadow: inset 0 0 0 1px #ffffff40;
+}
+[class*="IconButton-iconButton-"]:hover, [class*="IconButton-button-"]:hover {
+  box-shadow: inset 0 0 0 1px var(--ax-accent);
+}
+[data-testid="cellItem"] { padding: 0 3px; }
+[class*="MetadataPosterCardTitle-title-"] { color: ${k.text}; }
+` : ""}
+
+/* ---- chrome ---- */
+[class*="PageHeader-pageHeader-"] {
+  position: relative; z-index: 40; background-color: transparent;
+  transition: background-color var(--ax-dur) var(--ax-ease);
+}
+[class*="PageHeader-pageHeader-"]::before {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: ${flix ? "140px" : "230px"};
+  pointer-events: none; z-index: -1;
+  background: ${flix
+    ? "linear-gradient(180deg, #000000b3 10%, #0000 100%)"
+    : prime
+      ? "linear-gradient(180deg, #00050dd9 0%, #00050d00 100%)"
+      : "linear-gradient(0deg, #0000 0%, #0000000a 14.93%, #00000021 30.32%, #00000040 45.76%, #0006 60.85%, #0000008c 75.19%, #000000b0 88.37%, #000c 100%)"};
+  opacity: 1; transition: opacity var(--ax-dur) var(--ax-ease);
+}
+[class*="PageHeader-pageHeader-"]::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; pointer-events: none;
+  background: linear-gradient(90deg, #fff0, #fff3 20% 80%, #fff0);
+  opacity: 0; transition: opacity var(--ax-dur) var(--ax-ease);
+}
+body.pyro-aurora-scrolled [class*="PageHeader-pageHeader-"] {
+  background-color: ${k.nav};
+  ${flix ? "" : `-webkit-backdrop-filter: blur(${k.blur}) saturate(160%); backdrop-filter: blur(${k.blur}) saturate(160%);`}
+}
+body.pyro-aurora-scrolled [class*="PageHeader-pageHeader-"]::before { opacity: 0; }
+body.pyro-aurora-scrolled [class*="PageHeader-pageHeader-"]::after  { opacity: ${flix ? 0 : 1}; }
+
+[class*="NavBar-container-"] { background: transparent; border-radius: var(--ax-r-btn); }
+
+[class*="TabButton-button-"],
+[class*="PageHeaderTabButton-button-"] {
+  border-radius: var(--ax-r-btn);
+  transition: color var(--ax-dur-s) var(--ax-ease), background-color var(--ax-dur-s) var(--ax-ease);
+}
+[class*="TabButton-button-"]:hover,
+[class*="PageHeaderTabButton-button-"]:hover { color: #fff !important; background-color: #ffffff0d !important; }
+[class*="TabButton-selected-"],
+[class*="PageHeaderTabButton-isSelected-"],
+[class*="TabButton-selected-"] *,
+[class*="PageHeaderTabButton-isSelected-"] * { color: var(--ax-accent) !important; }
+[class*="TabButton-selected-"]::after,
+[class*="PageHeaderTabButton-isSelected-"]::after {
+  background-color: var(--ax-accent); height: 2px; border-radius: 2px;
+}
+
+/* Selected library in the sidebar: Plex tints the label and the icon too. */
+[class*="SourceSidebarLink-isSelected-"] [class*="SourceSidebarLink-title-"],
+[class*="SourceSidebarLink-isSelected-"] [class*="SourceSidebarLink-iconContainer-"],
+[class*="SidebarLink-isSelected-"] [class*="title-"],
+[class*="SidebarLink-isSelected-"] svg { color: var(--ax-accent) !important; }
+
+[class*="SourceSidebar-sidebar-"] {
+  background-color: ${k.sidebar}; border-radius: var(--ax-r-panel); box-shadow: inset 0 0 0 1px #ffffff0f;
+}
+[class*="SourceSidebar-expandedSidebar-"],
+[class*="SourceSidebar-openSidebar-"] [class*="SourceSidebar-pane-"] {
+  -webkit-backdrop-filter: blur(${k.blur}) saturate(150%); backdrop-filter: blur(${k.blur}) saturate(150%);
+}
+[class*="SourceSidebar-expandedSidebar-"] {
+  border-radius: var(--ax-r-panel); box-shadow: 0 24px 48px #00000080, inset 0 0 0 1px #ffffff14;
+}
+[class*="SourceSidebar-footer-"] { background-color: #0000001f; border-radius: 0 0 var(--ax-r-panel) var(--ax-r-panel); }
+
+[class*="SourceSidebarLink-sourceLink-"],
+[class*="SourceSidebarItem-button-"] {
+  border-radius: ${prime ? "12px" : "8px"};
+  transition: background-color var(--ax-dur-s) var(--ax-ease), color var(--ax-dur-s) var(--ax-ease);
+}
+[class*="SourceSidebarLink-sourceLink-"]:hover { background-color: #ffffff0f; }
+[class*="SourceSidebarLink-isSelected-"]::before,
+[class*="SidebarLink-isSelected-"]::before {
+  background-color: var(--ax-accent) !important;
+  width: 3px !important; border-radius: 0 3px 3px 0 !important; top: 6px !important; bottom: 6px !important;
+}
+[class*="SourceSidebar-toggleMenuIcon-"] { background-color: #ffffff14; transition: background-color var(--ax-dur-s) var(--ax-ease); }
+[class*="SourceSidebar-toggleMenuIcon-"]:hover { background-color: #ffffff29; }
+
+[class*="Button-button-"]:not([class*="TabButton-"]):not([class*="SplitButton-"]) {
+  border-radius: var(--ax-r-btn);
+  transition: transform var(--ax-dur-s) var(--ax-ease), background-color var(--ax-dur-s) var(--ax-ease);
+}
+[class*="Button-button-"]:not([class*="TabButton-"]):not([class*="SplitButton-"]):not(.isDisabled):hover { transform: scale(1.04); }
+[class*="Button-button-"]:not([class*="TabButton-"]):not([class*="SplitButton-"]):active { transform: scale(.98); }
+
+[class*="IconButton-iconButton-"], [class*="IconButton-button-"] {
+  border-radius: 999px;
+  transition: background-color var(--ax-dur-s) var(--ax-ease), color var(--ax-dur-s) var(--ax-ease),
+              transform var(--ax-dur-s) var(--ax-ease);
+}
+[class*="IconButton-iconButton-"]:hover:not(.isDisabled),
+[class*="IconButton-button-"]:hover:not(.isDisabled) { color: #fff; transform: scale(1.1); }
+
+[class*="UniversalSearch-searchInputContainer-"] input,
+input[type="search"] {
+  border-radius: ${flix ? "4px" : "999px"} !important;
+  transition: background-color var(--ax-dur-s) var(--ax-ease), box-shadow var(--ax-dur-s) var(--ax-ease);
+}
+[class*="UniversalSearch-searchInputContainer-"] input:focus { box-shadow: 0 0 0 2px #ffffff40; }
+
+[class*="Menu-menu-"], [class*="ModalContent-"], [class*="Modal-modal-"],
+[class*="MediaInfo"], [role="menu"], [role="dialog"] {
+  border-radius: var(--ax-r-panel) !important;
+  box-shadow: 0 24px 56px #000000a6, inset 0 0 0 1px #ffffff14;
+}
+${ownPalette ? `
+/* The Media Info window keeps Plex's stock grey, which clashes with the skin. */
+[class*="ModalContent-"], [class*="Modal-modal-"], [class*="MediaInfo"],
+[role="dialog"] { background-color: ${k.sidebarOpen} !important; }
+[class*="ModalHeader-"], [class*="ModalFooter-"] { background-color: transparent !important; }
+` : ""}
+
+/* The detail page: Plex's own links and expanders are gold by default. */
+${ownPalette ? `
+[class*="PrePlayDetails-"] a, [class*="MetadataDetails-"] a,
+[class*="ExpandableText-"] button, [class*="ExpandableText-"] a,
+[class*="StreamSelector-"] [class*="selected"],
+[class*="MediaInfo"] a { color: var(--ax-accent) !important; }
+` : ""}
+[class*="Overlay-overlay-"], [class*="Backdrop-"] {
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+
+[class*="Scroller-scroller-"] { scrollbar-width: thin; }
+[class*="Scroller-scroller-"]::-webkit-scrollbar { width: 10px; height: 10px; }
+[class*="Scroller-scroller-"]::-webkit-scrollbar-thumb {
+  background-color: #ffffff21; border: 3px solid transparent; background-clip: padding-box; border-radius: 8px;
+}
+[class*="Scroller-scroller-"]::-webkit-scrollbar-thumb:hover { background-color: #ffffff3d; }
+
+@media (prefers-reduced-motion: reduce) {
+  [class*="PosterCard-card-"], [class*="PosterCard-card-"]::after,
+  [class*="Button-button-"], [class*="PageHeader-pageHeader-"] { transition-duration: .01ms !important; }
+  [class*="PosterCard-card-"]:hover { transform: none !important; }
+}
+
+/* Never touch the player, nor another script's own panels. */
+.show-video-player [class*="PageHeader-pageHeader-"],
+[class*="PlayerContainer-container-"] [class*="PosterCard-card-"],
+[data-pyro-ignore] [class*="PosterCard-card-"] { transform: none !important; }
+`;
+}
+
+
+/* ============================================================
+   SKINS — mounting
+   ------------------------------------------------------------
+   One <style> kept at the very end of <html>, after the
+   theme.park <link>s, so the layout rules always win. Plus the
+   scroll flag the top bar needs (Plex scrolls a div, not the
+   window, hence the capture-phase listener).
+   ============================================================ */
+
+/* Plex paints a few things gold from JavaScript, or from class names that
+   change with every build: the dashboard pill, the loading spinner, a tab
+   label. Nothing in CSS can catch "whatever is currently Plex gold", so this
+   does it by reading the computed colour and repainting only those nodes.
+   It runs on the page chrome, never on the posters (the stylesheet covers
+   those), and only while a skin owns the palette. */
+const GOLD = new Set(["rgb(229, 160, 13)", "rgb(204, 123, 25)", "rgb(229, 160, 13)",
+                      "rgb(255, 199, 44)", "rgb(203, 141, 11)", "rgb(224, 157, 17)"]);
+/* Everything except the poster grids — those are covered by the stylesheet,
+   and walking thousands of cells on every change would cost real time. */
+const GOLD_SKIP = '[data-pyro-ignore], [data-testid="cellItem"], [class*="PosterCard-"],' +
+                  '[class*="VirtualListScroller-"], script, style, svg defs';
+const GOLD_BUDGET = 2000;      // elements examined per pass, worst case
+const GOLD_PROPS = ["color", "backgroundColor", "borderTopColor", "fill", "stroke"];
+const GOLD_CSS = { color: "color", backgroundColor: "background-color",
+                   borderTopColor: "border-color", fill: "fill", stroke: "stroke" };
+
+/* Some of that gold is written in the element's own style attribute, so the
+   original value is kept here and put back when the skin changes or goes. */
+const goldPrev = new WeakMap();
+
+function repaintGold(accent) {
+  if (!document.body) return;
+  const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, {
+    acceptNode: el => (el.matches && el.matches(GOLD_SKIP))
+      ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+  });
+  let el, seen = 0;
+  while ((el = walk.nextNode()) && seen < GOLD_BUDGET) {
+    seen++;
+    if (el.dataset && el.dataset.pyroGold === accent) continue;   // cheap check first
+    const cs = getComputedStyle(el);
+    const saved = goldPrev.get(el) || [];
+    let hit = false;
+    for (const p of GOLD_PROPS) {
+      if (!GOLD.has(cs[p])) continue;
+      const prop = GOLD_CSS[p];
+      if (!saved.some(x => x[0] === prop)) {
+        saved.push([prop, el.style.getPropertyValue(prop), el.style.getPropertyPriority(prop)]);
+      }
+      el.style.setProperty(prop, accent, "important");
+      hit = true;
+    }
+    if (hit) { goldPrev.set(el, saved); el.dataset.pyroGold = accent; }
+  }
+}
+
+function restoreGold(el) {
+  const saved = goldPrev.get(el);
+  if (saved) {
+    for (const [prop, value, priority] of saved) {
+      if (value) el.style.setProperty(prop, value, priority);
+      else el.style.removeProperty(prop);
+    }
+    goldPrev.delete(el);
+  } else {
+    ["color", "background-color", "border-color", "fill", "stroke"].forEach(p => el.style.removeProperty(p));
+  }
+  delete el.dataset.pyroGold;
+}
+
+const Skin = (() => {
+  const STYLE_ID = "pyro-aurora";          // same id since 1.7.0
+  let on = false, listening = false, ticking = false;
+  let goldAccent = null, goldQueued = false, goldObserver = null;
+
+  function scheduleGold() {
+    if (!goldAccent || goldQueued) return;
+    goldQueued = true;
+    setTimeout(() => { goldQueued = false; if (goldAccent) repaintGold(goldAccent); }, 400);
+  }
+
+  function clearStamps() {
+    document.querySelectorAll("[data-pyro-gold]").forEach(restoreGold);
+  }
+
+  function watchGold(accent) {
+    // Switching skin: what we painted red is no longer "gold" to look for,
+    // so hand those nodes back to Plex before hunting again.
+    if (goldAccent && goldAccent !== accent) clearStamps();
+    goldAccent = accent;
+    if (!accent) return;
+    scheduleGold();
+    if (goldObserver) return;
+    goldObserver = new MutationObserver(scheduleGold);
+    if (document.body) goldObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function stopGold() {
+    goldAccent = null;
+    if (goldObserver) { goldObserver.disconnect(); goldObserver = null; }
+    clearStamps();
+  }
+
+  function onScroll(e) {
+    const t = e.target;
+    if (!t || t === document || typeof t.className !== "string") return;
+    if (t.className.indexOf("Scroller-vertical-") === -1 || ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      ticking = false;
+      if (document.body) document.body.classList.toggle("pyro-aurora-scrolled", t.scrollTop > 12);
+    });
+  }
+
+  /** Called on every theme change too: the accent follows the theme. */
+  function apply(id, accent, ownPalette) {
+    on = !!SKINS[id];
+    let el = document.getElementById(STYLE_ID);
+    if (!on) {
+      if (el) el.remove();
+      if (listening) { document.removeEventListener("scroll", onScroll, true); listening = false; }
+      if (document.body) document.body.classList.remove("pyro-aurora-scrolled");
+      stopGold();
+      return;
+    }
+    if (!el) {
+      el = document.createElement("style");
+      el.id = STYLE_ID;
+      el.dataset.pyroIgnore = "";
+    }
+    el.dataset.skin = id;
+    el.textContent = skinCss(id, accent, ownPalette);
+    document.documentElement.appendChild(el);      // last = wins over theme.park
+    if (!listening) { document.addEventListener("scroll", onScroll, true); listening = true; }
+    // theme.park already recolours everything it reaches, so only hunt the
+    // leftover gold when the skin is the one holding the palette.
+    if (ownPalette) watchGold(accent); else stopGold();
+  }
+
+  /** Put our sheet back at the end after anything else was appended. */
+  function keepLast() {
+    if (!on) return;
+    const el = document.getElementById(STYLE_ID);
+    if (el && document.documentElement.lastElementChild !== el) document.documentElement.appendChild(el);
+  }
+
+  return { apply, keepLast };
+})();
+
+/* ============================================================
    THEME PICKER (replaces the old <select>)
    ------------------------------------------------------------
    · Open it with the 🎨 pill in the bottom-left bar,
@@ -279,6 +913,7 @@ GM_addStyle(`
 (function () {
   const THEME_KEY  = "pyroThemeOverride";   // same key as the old <select>: your saved theme carries over
   const ADDON_KEY  = "pyroThemeAddons";
+  const UI_KEY     = "pyroUiStyle";          // "plex" (stock layout) | "aurora"
   const SHEET_ATTR = "data-pyro-themepark";
   const HOTKEY     = "Alt+Shift+T";
   const isHotkey = e => e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === "KeyT";
@@ -294,6 +929,41 @@ GM_addStyle(`
   const readAddons = v => Object.fromEntries(ADDONS.map(a => [a.id, !(v && typeof v === "object" && v[a.id] === false)]));
   let theme  = readTheme(GM_getValue(THEME_KEY, null));
   let addons = readAddons(GM_getValue(ADDON_KEY, null));
+
+  // theme.park paints the colours; the interface style changes the shapes.
+  const UI_STYLES = [
+    { id: "plex",    label: "Plex",      hint: "Plex's own layout, untouched",
+      bg: "linear-gradient(180deg,#2d3034 0%,#202327 100%)" },
+    { id: "aurora",  label: "Aurora",    hint: "Calm and neutral: gentle zoom, blurred bar, glass sidebar",
+      bg: "linear-gradient(135deg,#17171b 0%,#23232b 55%,#2e2e3a 100%)" },
+    { id: "netflix", label: "PlexFlix",  hint: "Near-black, bigger zoom, red ring, square corners",
+      bg: "linear-gradient(135deg,#141414 0%,#2a0a0d 58%,#e50914 190%)" },
+    { id: "prime",   label: "Prime",     hint: "Deep navy, very rounded corners, blue accent",
+      bg: "linear-gradient(135deg,#00050d 0%,#0d2235 55%,#1a98ff 190%)" }
+  ];
+  const readUi = v => (UI_STYLES.some(u => u.id === v) ? v : "plex");
+  const uiLabel = id => (UI_STYLES.find(u => u.id === id) || UI_STYLES[0]).label;
+  let uiStyle = readUi(GM_getValue(UI_KEY, null));
+
+  // Aurora borrows the active theme's accent, and only paints the page itself
+  // when there is no theme.park sheet to respect ("Default").
+  // theme.park on  → the skin borrows the theme's accent, palette untouched.
+  // "Default"       → the skin paints its own palette, with its own accent.
+  function applyAurora() {
+    const t = byId(theme);
+    const own = !t.url;
+    const accent = own && SKINS[uiStyle] ? SKINS[uiStyle].accent : `rgb(${t.acc})`;
+    Skin.apply(uiStyle, accent, own);
+  }
+
+  function setUiStyle(id) {
+    id = readUi(id);
+    if (id === uiStyle) return;
+    uiStyle = id;
+    GM_setValue(UI_KEY, uiStyle);
+    applyAurora();
+    refresh();
+  }
 
 
   /* ---------- stylesheets ---------- */
@@ -362,8 +1032,10 @@ GM_addStyle(`
     const token = ++applyToken;
     setBusy(true);
     refresh();
+    applyAurora();
     mountSheets().then(ok => {
       if (token !== applyToken) return;
+      Skin.keepLast();            // the fresh theme <link>s went in after it
       setBusy(false);
       showStatus(ok ? "" : "Couldn't load the theme from theme-park.dev. Check your connection.");
     });
@@ -494,6 +1166,23 @@ GM_addStyle(`
     }
     @keyframes shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
 
+    .ui-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .ui-tile {
+      all: unset; position: relative; cursor: pointer; overflow: hidden;
+      padding: 10px 12px; border-radius: 8px; background: var(--bg); color: #f2f2f2;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.07);
+      transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
+    }
+    .ui-tile:hover { transform: translateY(-1px); filter: brightness(1.1); box-shadow: inset 0 0 0 1px rgba(255,255,255,.22); }
+    .ui-tile:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+    .ui-tile b { display: block; font-weight: 600; font-size: 13px; }
+    .ui-tile small { display: block; color: #a9aeb5; font-size: 11px; line-height: 1.35; margin-top: 2px; }
+    .ui-tile[aria-pressed="true"] { box-shadow: 0 0 0 2px rgb(var(--acc)), inset 0 0 0 1px rgba(255,255,255,.2); }
+    .ui-tile[aria-pressed="true"]::after {
+      content: "✓"; position: absolute; top: 8px; right: 8px; width: 18px; height: 18px; border-radius: 50%;
+      display: grid; place-items: center; background: rgb(var(--acc)); color: #111; font: 700 11px/1 system-ui, sans-serif;
+    }
+
     .addons { display: grid; gap: 6px; transition: opacity .15s; }
     .addons[data-off] { opacity: .4; pointer-events: none; }
     .row {
@@ -549,6 +1238,8 @@ GM_addStyle(`
           <button class="x" type="button" aria-label="Close">×</button>
         </div>
         <div class="grid"></div>
+        <div class="section">Interface<em>· layout, not colours</em></div>
+        <div class="ui-grid"></div>
         <div class="section">Addons<em class="off-note" hidden>· off with Default</em></div>
         <div class="addons"></div>
         <div class="status" hidden></div>
@@ -572,6 +1263,21 @@ GM_addStyle(`
       tile.style.setProperty("--tile-acc", t.acc);
       tile.addEventListener("click", () => setTheme(t.id));
       grid.appendChild(tile);
+    }
+
+    const uiGrid = root.querySelector(".ui-grid");
+    for (const u of UI_STYLES) {
+      const tile = document.createElement("button");
+      tile.type = "button";
+      tile.className = "ui-tile";
+      tile.dataset.ui = u.id;
+      tile.title = u.hint;
+      tile.style.setProperty("--bg", u.bg);
+      const b = document.createElement("b"); b.textContent = u.label;
+      const small = document.createElement("small"); small.textContent = u.hint;
+      tile.append(b, small);
+      tile.addEventListener("click", () => setUiStyle(u.id));
+      uiGrid.appendChild(tile);
     }
 
     const box = root.querySelector(".addons");
@@ -648,13 +1354,17 @@ GM_addStyle(`
   function buildMenu() {
     if (typeof GM_registerMenuCommand !== "function") return;
     const t = byId(theme);
-    if (menuState === t.id) return;
-    menuState = t.id;
+    if (menuState === t.id + "|" + uiStyle) return;
+    menuState = t.id + "|" + uiStyle;
     if (typeof GM_unregisterMenuCommand === "function") menuIds.forEach(id => { try { GM_unregisterMenuCommand(id); } catch (_) {} });
     menuIds = [
       GM_registerMenuCommand(`🎨 Theme picker (current: ${t.label})`, () => openPanel()),
       GM_registerMenuCommand("⏭ Next theme", () => cycle(1)),
-      GM_registerMenuCommand("⏮ Previous theme", () => cycle(-1))
+      GM_registerMenuCommand("⏮ Previous theme", () => cycle(-1)),
+      GM_registerMenuCommand(`🪟 Interface: ${uiLabel(uiStyle)} → next`, () => {
+        const i = UI_STYLES.findIndex(u => u.id === uiStyle);
+        setUiStyle(UI_STYLES[(i + 1) % UI_STYLES.length].id);
+      })
     ];
   }
 
@@ -666,11 +1376,12 @@ GM_addStyle(`
     if (pill) {
       pillDot.style.background = t.bg;
       pillLabel.textContent = t.label;
-      pill.title = `Theme: ${t.label} (${HOTKEY})`;
+      pill.title = `Theme: ${t.label} · Interface: ${uiLabel(uiStyle)} (${HOTKEY})`;
     }
     if (panel) {
       panel.style.setProperty("--acc", t.acc);
       panel.querySelectorAll(".tile").forEach(el => el.setAttribute("aria-pressed", String(el.dataset.id === t.id)));
+      panel.querySelectorAll(".ui-tile").forEach(el => el.setAttribute("aria-pressed", String(el.dataset.ui === uiStyle)));
       panel.querySelectorAll(".switch").forEach(sw => { sw.checked = !!addons[sw.dataset.addon]; sw.disabled = !t.url; });
       panel.querySelector(".addons").toggleAttribute("data-off", !t.url);
       panel.querySelector(".off-note").hidden = !!t.url;
@@ -685,11 +1396,13 @@ GM_addStyle(`
   function tick() {
     queued = false;
     if (sheetsNeedReorder() && reorderAllowed()) mountSheets();
+    Skin.keepLast();
     ensurePill();
   }
   const queueTick = () => { if (!queued) { queued = true; setTimeout(tick, 25); } };
 
-  mountSheets();
+  applyAurora();
+  mountSheets().then(Skin.keepLast);
   ensurePill();
 
   // Plex mutates the DOM constantly, so only react to what matters here:
