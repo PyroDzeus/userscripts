@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Plex Pyro Custom UI 🔥
 // @namespace    plex-pyro-custom-ui
-// @version      1.9.3
+// @version      2.0.8
 // @author       Pyro
-// @description  Theme Park themes + 3 modern interfaces (Aurora, PlexFlix, Prime) + stable top bar + guaranteed custom logo + flags + Blu-ray/DVD/LaserDisc/4K UHD/WEB badges + studio logos
+// @description  Theme Park themes + 3 modern interfaces with their own top bar (Aurora, PlexFlix, Prime) + stable top bar + guaranteed custom logo + flags + Blu-ray/DVD/LaserDisc/4K UHD/WEB badges + studio logos
 // @match        https://app.plex.tv/*
 // @match        http://*/web/*
 // @match        https://*/web/*
@@ -394,11 +394,15 @@ html, body { background-color: var(--ax-bg) !important; }
 [class*="UnplayedIndicator"],
 [class*="PlayedIndicator"] { background-color: var(--ax-accent) !important; }
 
-[class*="ProgressBar-fill"],
-[class*="ProgressBar-progress"],
-[class*="Progress-fill"],
-[class*="PlayProgress"],
-[class*="MetadataPosterCardProgress"] > div,
+/* Only the filled part, which Plex sizes with an inline width. Painting the
+   track as well is what made every poster look watched right through. */
+/* A filled bar is an empty element sized by Plex; the dashboard's session
+   card also has "Progress" in its class names but holds the text, so :empty
+   is what keeps the colour on the bar and off the card. */
+[class*="Progress"] > div:empty,
+[class*="Progress"] > span:empty,
+[class*="ProgressBar-fill"]:empty,
+[class*="Progress-fill"]:empty,
 progress::-webkit-progress-value { background-color: var(--ax-accent) !important; }
 
 [class*="Button-primary"],
@@ -409,7 +413,7 @@ progress::-webkit-progress-value { background-color: var(--ax-accent) !important
   color: ${flix || prime ? "#fff" : "#101010"} !important;
 }
 [class*="Button-primary"]:hover,
-[class*="Button-button-"][class*="primary"]:hover { background-color: ${k.accentHover} !important; }
+[class*="Button-button-"][class*="primary"]:hover, .pyro-play:hover { background-color: #fff !important; }
 
 input[type="checkbox"], input[type="radio"], input[type="range"], progress { accent-color: var(--ax-accent); }
 [class*="Toggle-"][class*="checked"],
@@ -539,12 +543,12 @@ a[class*="MetadataPosterCardTitle-title-"]:hover { text-decoration: none !import
 ${id === "aurora" ? `
 /* Disney+ CTA: white pill, dark label, hover #e9ebf0. Titles stay readable. */
 [class*="Button-primary"],
-[class*="Button-button-"][class*="primary"] {
+[class*="Button-button-"][class*="primary"], .pyro-play {
   background-color: #f1f2f4 !important; color: #252526 !important;
   border-radius: 100px !important; font-weight: 600; letter-spacing: .02em;
 }
 [class*="Button-primary"]:hover,
-[class*="Button-button-"][class*="primary"]:hover { background-color: #e9ebf0 !important; }
+[class*="Button-button-"][class*="primary"]:hover, .pyro-play:hover { background-color: #e9ebf0 !important; }
 [class*="MetadataPosterCardTitle-title-"] { opacity: .88; }
 [data-testid="cellItem"]:hover [class*="MetadataPosterCardTitle-title-"] { opacity: 1; }
 ` : ""}
@@ -552,13 +556,13 @@ ${flix ? `
 /* Netflix: white Play button with square corners, grey secondary, and poster
    titles that only appear when the row is hovered. */
 [class*="Button-primary"],
-[class*="Button-button-"][class*="primary"] {
+[class*="Button-button-"][class*="primary"], .pyro-play {
   background-color: #fff !important; color: #141414 !important;
   border-radius: 4px !important; font-weight: 700;
 }
 [class*="Button-primary"]:hover,
-[class*="Button-button-"][class*="primary"]:hover { background-color: #e6e6e6 !important; }
-[class*="Button-button-"]:not([class*="primary"]):not([class*="TabButton-"]) {
+[class*="Button-button-"][class*="primary"]:hover, .pyro-play:hover { background-color: #e6e6e6 !important; }
+[class*="Button-button-"]:not([class*="primary"]):not([class*="TabButton-"]):not(.pyro-play) {
   background-color: #6d6d6eb3 !important; color: #fff !important; border-radius: 4px !important;
 }
 [class*="MetadataPosterCardTitle-title-"] {
@@ -586,13 +590,13 @@ ${prime ? `
 /* Prime Video: everything rounder — pill CTA, 12px chips, circular icon
    buttons with a thin outline, and a little more air between posters. */
 [class*="Button-primary"],
-[class*="Button-button-"][class*="primary"] {
-  background-color: var(--ax-accent) !important; color: #fff !important;
-  border-radius: 10000px !important; font-weight: 600; padding-left: 18px; padding-right: 18px;
+[class*="Button-button-"][class*="primary"], .pyro-play {
+  background-color: #f1f1f1 !important; color: #0f171e !important;
+  border-radius: 10px !important; font-weight: 700; padding-left: 18px; padding-right: 18px;
 }
 [class*="Button-primary"]:hover,
-[class*="Button-button-"][class*="primary"]:hover { background-color: ${k.accentHover} !important; }
-[class*="Button-button-"]:not([class*="primary"]):not([class*="TabButton-"]) {
+[class*="Button-button-"][class*="primary"]:hover, .pyro-play:hover { background-color: #fff !important; }
+[class*="Button-button-"]:not([class*="primary"]):not([class*="TabButton-"]):not(.pyro-play) {
   background-color: #ffffff1a !important; border-radius: 10000px !important;
 }
 [class*="IconButton-iconButton-"], [class*="IconButton-button-"] {
@@ -604,6 +608,90 @@ ${prime ? `
 [data-testid="cellItem"] { padding: 0 3px; }
 [class*="MetadataPosterCardTitle-title-"] { color: ${k.text}; }
 ` : ""}
+
+/* ============================================================================
+ *  THE TOP BAR
+ *  Plex keeps its page tabs (Recommended, Library, Collections…) on a second
+ *  row. The three sites put them in the bar itself, so the script moves them
+ *  up and each skin then dresses them its own way — a white pill on Netflix,
+ *  a white rounded rectangle on Prime Video, a dark segmented pill on
+ *  Disney+. Proportions below are measured from the three bars.
+ * ========================================================================= */
+/* Measured on the three bars, pill by pill, at the centre of each pill
+   (Retina captures, halved):
+     Netflix     active pill 80.5 x 40.5, fully round, white veil at 22%,
+                 label cap 11.5 → 14px here, 13.5 of padding either side
+     Prime Video active block 104 x 42, 10px corners, #e7e7e8, text #0f171e
+     Disney+     active pill 108 x 40 inside a 52-tall group with 6 of
+                 padding, labels #b6b6b7
+   The height is set outright rather than left to padding: that was what
+   made the first attempt 18 to 20px too tall. */
+#pyro-topbar-tabs {
+  display: flex; align-items: center; min-width: 0; overflow: hidden;
+  ${flix ? "gap: 12px; margin-left: 24px; margin-right: auto;"
+    : prime ? "gap: 8px; margin-left: 24px; margin-right: auto;"
+    : "gap: 0; margin: 0 auto; padding: 6px; border-radius: 999px; background: #26262be6;"}
+}
+/* The row Plex hands us brings its own spacing; the skin sets it instead,
+   so the distance between labels matches the site it imitates. */
+#pyro-topbar-tabs > * {
+  display: flex !important; align-items: center !important;
+  gap: ${flix ? "12px" : prime ? "8px" : "0px"} !important;
+  margin: 0 !important; padding: 0 !important; border: 0 !important; background: none !important;
+}
+#pyro-topbar-tabs [class*="TabButton-button-"],
+#pyro-topbar-tabs [class*="PageHeaderTabButton-button-"],
+#pyro-topbar-tabs a, #pyro-topbar-tabs button {
+  display: inline-flex !important; align-items: center !important; justify-content: center !important;
+  box-sizing: border-box !important;
+  font-family: inherit; line-height: 1;
+  ${flix ? "height: 40px; padding: 0 14px; font-size: 14px; font-weight: 500; border-radius: 999px; color: rgba(255,255,255,.72) !important;"
+    : prime ? "height: 42px; padding: 0 16px; font-size: 14px; font-weight: 600; border-radius: 10px; color: #fff !important;"
+    : "height: 40px; padding: 0 20px; font-size: 14px; font-weight: 600; border-radius: 999px; color: #b6b6b7 !important;"}
+  white-space: nowrap; background: none; min-width: 0;
+  transition: background-color var(--ax-dur-s) var(--ax-ease), color var(--ax-dur-s) var(--ax-ease);
+}
+#pyro-topbar-tabs [class*="TabButton-button-"]:hover,
+#pyro-topbar-tabs [class*="PageHeaderTabButton-button-"]:hover {
+  color: #fff !important;
+  background-color: ${flix ? "rgba(255,255,255,.1)" : prime ? "rgba(255,255,255,.12)" : "rgba(255,255,255,.08)"} !important;
+}
+/* The selected one: the single biggest difference between the three bars. */
+#pyro-topbar-tabs [class*="TabButton-selected-"],
+#pyro-topbar-tabs [class*="PageHeaderTabButton-isSelected-"] {
+  ${flix ? "background: rgba(255,255,255,.22) !important; color: #fff !important; font-weight: 700;"
+    : prime ? "background: #e7e7e8 !important; color: #0f171e !important; border-radius: 10px !important; font-weight: 700;"
+    : "background: #fff !important; color: #111 !important; font-weight: 700;"}
+}
+#pyro-topbar-tabs [class*="TabButton-selected-"] *,
+#pyro-topbar-tabs [class*="PageHeaderTabButton-isSelected-"] * {
+  color: inherit !important;
+}
+/* No underline once the tab is a pill. */
+#pyro-topbar-tabs [class*="TabButton-selected-"]::after,
+#pyro-topbar-tabs [class*="PageHeaderTabButton-isSelected-"]::after { display: none !important; }
+
+/* The bar itself: heights measured on the three sites. */
+/* Bar heights, measured the same way: Netflix 68, Prime Video 56,
+   Disney+ 62 — and Disney+ centres its group, hence the gap of 0. */
+body.pyro-topbar [class*="NavBar-container-"],
+body.pyro-topbar [class*="NavBar-navBar-"] {
+  height: ${flix ? "57px" : prime ? "56px" : "62px"};
+  min-height: 0; padding-top: 0; padding-bottom: 0; align-items: center;
+  padding-left: ${flix ? "4%" : "24px"}; padding-right: ${flix ? "4%" : "24px"};
+  gap: ${prime ? "12px" : "16px"};
+}
+/* Plex's search field is what pushes the bar past those heights. */
+body.pyro-topbar [class*="UniversalSearch-"] input,
+body.pyro-topbar [class*="UniversalSearch-searchInputContainer-"] {
+  height: ${flix ? "34px" : prime ? "34px" : "36px"};
+  min-height: 0;
+}
+/* The row the tabs came from keeps the library name and the view controls,
+   so it stays — just thinner, and out of the way. */
+body.pyro-topbar [class*="PageHeader-pageHeader-"] {
+  min-height: 0; padding-top: 6px; padding-bottom: 6px;
+}
 
 /* ---- chrome ---- */
 [class*="PageHeader-pageHeader-"] {
@@ -818,6 +906,98 @@ function restoreGold(el) {
   delete el.dataset.pyroGold;
 }
 
+/* ------------------------------------------------------------------
+   Moving Plex's page tabs into the top bar.
+
+   Everything is found by structure rather than by class name, because
+   Plex renames its classes on every build: the tabs are "the smallest
+   element holding every tab button", the bar is "the element holding
+   the search field". Plex re-renders constantly, so the move is redone
+   whenever it undoes it, and a marker node remembers where the tabs
+   came from so they can be put back when the skin is switched off.
+   ------------------------------------------------------------------ */
+/* Plex's main action button carries no stable class, so it is recognised by
+   what it says — in either language — and tagged once. The skins then style
+   .pyro-play as the white button all three sites use. */
+const PLAY_LABEL = /^(play|lecture|lire|resume|reprendre|regarder|watch)\b/i;
+
+function tagPlayButton() {
+  const buttons = document.querySelectorAll('button, [role="button"], a[class*="Button-"]');
+  for (const b of buttons) {
+    if (b.closest("[data-pyro-ignore]")) continue;
+    // the label often starts with an icon glyph, so letters first
+    const txt = (b.getAttribute("aria-label") || b.textContent || "")
+      .replace(/^[^\p{L}]+/u, "").trim();
+    const hit = PLAY_LABEL.test(txt) && txt.length < 24;
+    b.classList.toggle("pyro-play", hit);
+  }
+}
+
+const TopBar = (() => {
+  const WRAP_ID = "pyro-topbar-tabs";
+  const TAB_SEL = '[class*="TabButton-button-"], [class*="PageHeaderTabButton-button-"]';
+  let home = null;             // comment node left where the tabs used to live
+  let moved = null;            // the element we moved
+
+  function tabsRow() {
+    const tabs = [...document.querySelectorAll(TAB_SEL)].filter(t => t.offsetParent !== null);
+    if (tabs.length < 2) return null;
+    let row = tabs[0].parentElement;
+    for (let i = 0; row && i < 4; i++, row = row.parentElement) {
+      if (tabs.every(t => row.contains(t))) return row;
+    }
+    return null;
+  }
+
+  /** The bar, plus the search box inside it — the tabs go right after it,
+      so they land between the search and the account icons, never past them. */
+  function barAndSearch() {
+    const input = document.querySelector('[class*="UniversalSearch-"] input, input[type="search"]');
+    if (!input) return null;
+    let search = input, el = input;
+    for (let i = 0; el && i < 6; i++, el = el.parentElement) {
+      const cls = (el.className || "").toString();
+      if (/NavBar-|TopBar-|Masthead/.test(cls)) return { bar: el, search: search === input ? input.parentElement : search };
+      search = el;
+    }
+    return null;
+  }
+
+  function apply() {
+    const row = moved && moved.isConnected ? moved : tabsRow();
+    const found = barAndSearch();
+    if (!row || !found || row.id === WRAP_ID) return;
+    const { bar: top, search } = found;
+    let wrap = document.getElementById(WRAP_ID);
+    if (!wrap) {
+      wrap = document.createElement("div");
+      wrap.id = WRAP_ID;
+      wrap.dataset.pyroIgnore = "";
+    }
+    if (wrap.parentElement !== top || (search && search.nextElementSibling !== wrap)) {
+      if (search && search.parentElement === top) search.insertAdjacentElement("afterend", wrap);
+      else top.appendChild(wrap);
+    }
+    if (row.parentElement !== wrap) {
+      if (!home) { home = document.createComment("pyro-tabs"); row.parentElement.insertBefore(home, row); }
+      wrap.appendChild(row);
+      moved = row;
+    }
+    document.body.classList.add("pyro-topbar");
+  }
+
+  function restore() {
+    const wrap = document.getElementById(WRAP_ID);
+    if (moved && home && home.parentElement) home.parentElement.insertBefore(moved, home);
+    if (home && home.parentElement) home.parentElement.removeChild(home);
+    if (wrap) wrap.remove();
+    home = moved = null;
+    if (document.body) document.body.classList.remove("pyro-topbar");
+  }
+
+  return { apply, restore };
+})();
+
 const Skin = (() => {
   const STYLE_ID = "pyro-aurora";          // same id since 1.7.0
   let on = false, listening = false, ticking = false;
@@ -871,6 +1051,7 @@ const Skin = (() => {
       if (listening) { document.removeEventListener("scroll", onScroll, true); listening = false; }
       if (document.body) document.body.classList.remove("pyro-aurora-scrolled");
       stopGold();
+      TopBar.restore();
       return;
     }
     if (!el) {
@@ -884,12 +1065,16 @@ const Skin = (() => {
     if (!listening) { document.addEventListener("scroll", onScroll, true); listening = true; }
     // theme.park already recolours everything it reaches, so only hunt the
     // leftover gold when the skin is the one holding the palette.
+    tagPlayButton();
     if (ownPalette) watchGold(accent); else stopGold();
+    TopBar.apply();
   }
 
-  /** Put our sheet back at the end after anything else was appended. */
+  /** Put our sheet back at the end, and the tabs back in the bar. */
   function keepLast() {
     if (!on) return;
+    TopBar.apply();
+    tagPlayButton();
     const el = document.getElementById(STYLE_ID);
     if (el && document.documentElement.lastElementChild !== el) document.documentElement.appendChild(el);
   }
