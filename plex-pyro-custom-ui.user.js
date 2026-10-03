@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Plex Pyro Custom UI 🔥
 // @namespace    plex-pyro-custom-ui
-// @version      2.0.8
+// @version      2.0.8.1
 // @author       Pyro
 // @description  Theme Park themes + 3 modern interfaces with their own top bar (Aurora, PlexFlix, Prime) + stable top bar + guaranteed custom logo + flags + Blu-ray/DVD/LaserDisc/4K UHD/WEB badges + studio logos
 // @match        https://app.plex.tv/*
@@ -939,8 +939,10 @@ const TopBar = (() => {
   let home = null;             // comment node left where the tabs used to live
   let moved = null;            // the element we moved
 
+  /** The tab row Plex currently owns — the one that is NOT already in our bar. */
   function tabsRow() {
-    const tabs = [...document.querySelectorAll(TAB_SEL)].filter(t => t.offsetParent !== null);
+    const tabs = [...document.querySelectorAll(TAB_SEL)]
+      .filter(t => t.offsetParent !== null && !t.closest("#" + WRAP_ID));
     if (tabs.length < 2) return null;
     let row = tabs[0].parentElement;
     for (let i = 0; row && i < 4; i++, row = row.parentElement) {
@@ -964,10 +966,11 @@ const TopBar = (() => {
   }
 
   function apply() {
-    const row = moved && moved.isConnected ? moved : tabsRow();
     const found = barAndSearch();
-    if (!row || !found || row.id === WRAP_ID) return;
+    if (!found) return;
     const { bar: top, search } = found;
+    const fresh = tabsRow();                       // Plex's own row, if it has one
+
     let wrap = document.getElementById(WRAP_ID);
     if (!wrap) {
       wrap = document.createElement("div");
@@ -978,12 +981,20 @@ const TopBar = (() => {
       if (search && search.parentElement === top) search.insertAdjacentElement("afterend", wrap);
       else top.appendChild(wrap);
     }
-    if (row.parentElement !== wrap) {
-      if (!home) { home = document.createComment("pyro-tabs"); row.parentElement.insertBefore(home, row); }
-      wrap.appendChild(row);
-      moved = row;
+
+    if (fresh) {
+      // Plex rebuilt its row while ours was still in the bar: that is what made
+      // the tabs appear twice. The new one replaces the old, which is dropped.
+      if (moved && moved !== fresh) moved.remove();
+      if (home && home.parentElement) home.parentElement.removeChild(home);
+      home = document.createComment("pyro-tabs");
+      fresh.parentElement.insertBefore(home, fresh);
+      wrap.replaceChildren(fresh);
+      moved = fresh;
+    } else if (moved && !moved.isConnected) {
+      moved = null;                                // it went away with a re-render
     }
-    document.body.classList.add("pyro-topbar");
+    if (wrap.firstElementChild) document.body.classList.add("pyro-topbar");
   }
 
   function restore() {
@@ -995,7 +1006,32 @@ const TopBar = (() => {
     if (document.body) document.body.classList.remove("pyro-topbar");
   }
 
-  return { apply, restore };
+  /* Plex rebuilds the header on navigation. Without something watching, its
+     fresh row stays below while ours sits in the bar — the doubled bar. */
+  let watching = false, queued = false, observer = null;
+  const schedule = () => {
+    if (queued || !watching) return;
+    queued = true;
+    setTimeout(() => { queued = false; if (watching) apply(); }, 150);
+  };
+
+  function start() {
+    if (watching) { apply(); return; }
+    watching = true;
+    apply();
+    if (!observer) observer = new MutationObserver(schedule);
+    if (document.body) observer.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener("hashchange", schedule);
+  }
+
+  function stop() {
+    watching = false;
+    if (observer) observer.disconnect();
+    window.removeEventListener("hashchange", schedule);
+    restore();
+  }
+
+  return { apply, restore, start, stop };
 })();
 
 const Skin = (() => {
@@ -1051,7 +1087,7 @@ const Skin = (() => {
       if (listening) { document.removeEventListener("scroll", onScroll, true); listening = false; }
       if (document.body) document.body.classList.remove("pyro-aurora-scrolled");
       stopGold();
-      TopBar.restore();
+      TopBar.stop();
       return;
     }
     if (!el) {
@@ -1067,7 +1103,7 @@ const Skin = (() => {
     // leftover gold when the skin is the one holding the palette.
     tagPlayButton();
     if (ownPalette) watchGold(accent); else stopGold();
-    TopBar.apply();
+    TopBar.start();
   }
 
   /** Put our sheet back at the end, and the tabs back in the bar. */
