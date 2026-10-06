@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Plex Sidekick 🔗▶️
 // @namespace    pyro.plex.sidekick
-// @version      6.1.1
-// @description  Ton copilote Plex Web : boutons (avec logos) vers 20+ services (TMDB, IMDb, Letterboxd, JustWatch, Blu-ray.com, LDDb, DVDCompare, Criterion…) + lecture directe dans le lecteur de ton choix (IINA, Infuse, mpv, VLC, PotPlayer) avec choix de la version (4K, 1080p…) + épisode suivant + copie de l'URL directe. Colonne réductible, 7 styles dont des icônes compactes (cercles / petits carrés).
+// @version      6.2.0
+// @description  Ton copilote Plex Web : boutons (avec logos) vers 20+ services (TMDB, IMDb, Letterboxd, JustWatch, Blu-ray.com, LDDb, DVDCompare, Criterion…) + lecture directe dans le lecteur de ton choix (IINA, Infuse, mpv, VLC, PotPlayer) avec choix de la version (4K, 1080p…) + suivi Plex on/off pour IINA (progression, reprise, vu — via le plugin IINA Plex Sync) + épisode suivant + copie de l'URL directe. Colonne réductible, 7 styles dont des icônes compactes (cercles / petits carrés).
 // @author       Pyro
 // @license      MIT
 // @match        https://app.plex.tv/*
@@ -26,7 +26,7 @@
   'use strict';
 
   // One line in the console so you can tell at a glance that the script started.
-  console.info('[Plex Sidekick] 6.1.0 loaded');
+  console.info('[Plex Sidekick] 6.2.0 loaded');
 
   const COL_ID = 'psk-col';
   const PANEL_ID = 'psk-panel';
@@ -218,6 +218,7 @@
     custom: [],
     ui: { scale: 100, opacity: 100, style: 'classic', anim: true, logos: true, collapsed: false },
     versionPref: 'best',          // best | small | ask  — version lue par ▶ quand il y en a plusieurs
+    plexTrack: true,              // IINA : Plex enregistre la lecture (plugin IINA « Plex Sync »)
     order: null,
   };
 
@@ -255,6 +256,7 @@
       ui: Object.assign({}, DEFAULTS.ui, s.ui || {}),
       order: Array.isArray(s.order) ? s.order : null,
       versionPref: ['best', 'small', 'ask'].includes(s.versionPref) ? s.versionPref : DEFAULTS.versionPref,
+      plexTrack: s.plexTrack !== undefined ? !!s.plexTrack : DEFAULTS.plexTrack,
     };
     if (PLAYER_FIXES[st.player.template]) st.player.template = PLAYER_FIXES[st.player.template];
     st.order = reconcileOrder(st);
@@ -511,6 +513,7 @@
       const vars = templateVars({
         kind: 'episode',
         title: item.title,
+        ratingKey: item.ratingKey,
         searchTitle: item.grandparentTitle || item.title,
         partKey: item.partKey,
         versions: item.versions,
@@ -518,7 +521,7 @@
         tvdbItem: item.tvdb,
         season: item.parentIndex,
         episode: item.index,
-      }, v);
+      }, v, true);
       const href = fillTemplate(settings.player.template, vars);
       if (href) openPlayerUrl(href);
     });
@@ -530,7 +533,7 @@
       if (!item) return cb(false);
 
       const base = {
-        kind: item.type, title: item.title,
+        kind: item.type, title: item.title, ratingKey: item.ratingKey,
         imdb: item.imdb, tvdbItem: item.tvdb, partKey: item.partKey, versions: item.versions,
       };
 
@@ -586,9 +589,16 @@
       ? `${serverInfo.origin}${partKey}?X-Plex-Token=${serverInfo.token}` : null;
   }
 
-  function templateVars(d, version) {
+  /* Suivi Plex (IINA uniquement) : on glisse le ratingKey dans l'URL du fichier.
+     Plex ignore ce paramètre ; le plugin IINA « Plex Sync » le lit et signale
+     la lecture au serveur. Sans lui (suivi coupé), IINA lit sans rien dire. */
+  const isIina = () => /^iina:/i.test(settings.player.template || '');
+  const tracking = () => isIina() && settings.plexTrack;
+
+  function templateVars(d, version, forPlayer) {
     const v = version || (d ? pickVersion(d.versions, settings.versionPref) : null);
-    const direct = d ? directUrl(v ? v.partKey : d.partKey) : null;
+    let direct = d ? directUrl(v ? v.partKey : d.partKey) : null;
+    if (direct && forPlayer && tracking() && d.ratingKey) direct += `&psk_rk=${d.ratingKey}`;
     const t = d ? (d.searchTitle || d.title || '') : '';
     return {
       tmdb: d ? (d.kind === 'movie' ? d.tmdbMovie : d.tmdbShow) : null,
@@ -723,7 +733,7 @@
       border-radius: 4px; background: rgba(0,0,0,.2); font-size: .72em; font-weight: 800; letter-spacing: .02em;
     }
     .psk-mono.long { font-size: .6em; }
-    #${COL_ID}[data-anim="1"] .psk-btn, #${COL_ID}[data-anim="1"] .psk-more {
+    #${COL_ID}[data-anim="1"] .psk-btn, #${COL_ID}[data-anim="1"] .psk-more, #${COL_ID}[data-anim="1"] .psk-trk {
       transition: transform .16s ease, filter .16s ease, box-shadow .16s ease, opacity .16s ease;
       animation: psk-in .28s ease backwards;
     }
@@ -731,7 +741,7 @@
     .psk-btn:hover { opacity: 1; transform: translateX(-3px); filter: brightness(1.12);
       box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 6px 18px rgba(0,0,0,.5); }
     .psk-btn:active { transform: translateX(-3px) scale(.96); }
-    .psk-btn:focus-visible, .psk-more:focus-visible, .psk-open:focus-visible { outline: 2px solid #e5a00d; outline-offset: 2px; }
+    .psk-btn:focus-visible, .psk-more:focus-visible, .psk-trk:focus-visible, .psk-open:focus-visible { outline: 2px solid #e5a00d; outline-offset: 2px; }
     .psk-btn.off { opacity: calc(var(--psk-op) * .32); filter: grayscale(.7); cursor: not-allowed; box-shadow: none; }
     .psk-btn.off:hover { transform: none; filter: grayscale(.7); }
     .psk-btn.flash { filter: brightness(1.3); }
@@ -739,7 +749,7 @@
     /* bouton ▶ + choix de version */
     #${COL_ID} .psk-split { display: flex; position: relative; }
     #${COL_ID} .psk-split .psk-btn { flex: 1; min-width: 0; }
-    #${COL_ID} .psk-split:has(.psk-more) .psk-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+    #${COL_ID} .psk-split:has(.psk-more) .psk-btn, #${COL_ID} .psk-split:has(.psk-trk) .psk-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; }
     .psk-more {
       flex: 0 0 auto; width: calc(26px * var(--psk-scale)); border: 1px solid rgba(0,0,0,.18); border-left: 1px solid rgba(255,255,255,.28);
       border-radius: 0 7px 7px 0; cursor: pointer; color: #fff; font-weight: 800; font-size: calc(12px * var(--psk-scale));
@@ -747,6 +757,19 @@
       box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 2px 6px rgba(0,0,0,.35);
     }
     .psk-more:hover { filter: brightness(1.15); opacity: 1; }
+
+    /* interrupteur « suivi Plex » (IINA) : œil orange Plex = Plex enregistre */
+    .psk-trk {
+      flex: 0 0 auto; width: calc(28px * var(--psk-scale)); padding: 0; box-sizing: border-box;
+      display: flex; align-items: center; justify-content: center; cursor: pointer;
+      border: 1px solid rgba(0,0,0,.18); border-left: 1px solid rgba(255,255,255,.28); border-radius: 0;
+      background: linear-gradient(135deg,#4c5bd8,#7d5af2); color: rgba(255,255,255,.5); opacity: var(--psk-op);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 2px 6px rgba(0,0,0,.35);
+    }
+    .psk-trk .psk-ic { width: calc(15px * var(--psk-scale)); height: calc(15px * var(--psk-scale)); }
+    .psk-trk.on { color: #e5a00d; }
+    .psk-trk:hover { filter: brightness(1.15); opacity: 1; }
+    #${COL_ID} .psk-split .psk-trk:last-child { border-radius: 0 7px 7px 0; }
 
     /* réduire / agrandir */
     #${COL_ID} .psk-min { font-size: 18px; font-weight: 700; }
@@ -762,22 +785,24 @@
     /* ---------- styles « texte » ---------- */
     #${COL_ID}.st-pill .psk-btn { border-radius: 999px; }
     #${COL_ID}.st-pill .psk-split:has(.psk-more) .psk-btn { border-radius: 999px 0 0 999px; }
-    #${COL_ID}.st-pill .psk-more { border-radius: 0 999px 999px 0; }
-    #${COL_ID}.st-square .psk-btn, #${COL_ID}.st-square .psk-more { border-radius: 2px; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
-    #${COL_ID}.st-glass .psk-btn, #${COL_ID}.st-glass .psk-more {
+    #${COL_ID}.st-pill .psk-more, #${COL_ID}.st-pill .psk-split .psk-trk:last-child { border-radius: 0 999px 999px 0; }
+    #${COL_ID}.st-square .psk-btn, #${COL_ID}.st-square .psk-more, #${COL_ID}.st-square .psk-split .psk-trk:last-child { border-radius: 2px; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+    #${COL_ID}.st-glass .psk-btn, #${COL_ID}.st-glass .psk-more, #${COL_ID}.st-glass .psk-trk {
       background: rgba(15,17,23,.55) !important;
       backdrop-filter: blur(12px) saturate(1.5); -webkit-backdrop-filter: blur(12px) saturate(1.5);
       border: 1px solid rgba(255,255,255,.14);
       color: var(--psk-accent, #fff) !important;
     }
     #${COL_ID}.st-glass .psk-btn:hover { background: rgba(25,28,36,.7) !important; }
-    #${COL_ID}.st-outline .psk-btn, #${COL_ID}.st-outline .psk-more {
+    #${COL_ID}.st-outline .psk-btn, #${COL_ID}.st-outline .psk-more, #${COL_ID}.st-outline .psk-trk {
       background: rgba(10,12,16,.4) !important;
       border: 1.5px solid var(--psk-accent, #fff);
       color: var(--psk-accent, #fff) !important;
       box-shadow: none;
     }
-    #${COL_ID}.st-outline .psk-more { border-color: #9b8cff; color: #9b8cff !important; }
+    #${COL_ID}.st-outline .psk-more, #${COL_ID}.st-outline .psk-trk { border-color: #9b8cff; color: #9b8cff !important; }
+    #${COL_ID}.st-glass .psk-trk { color: rgba(255,255,255,.45) !important; }
+    #${COL_ID}.st-glass .psk-trk.on, #${COL_ID}.st-outline .psk-trk.on { color: #e5a00d !important; }
     #${COL_ID}.st-glass .psk-mono, #${COL_ID}.st-outline .psk-mono { background: transparent; border: 1px solid currentColor; }
 
     /* ---------- styles compacts : icônes seules ---------- */
@@ -800,7 +825,14 @@
     #${COL_ID}.st-circle .psk-split .psk-btn, #${COL_ID}.st-tile .psk-split .psk-btn { border-radius: inherit; }
     #${COL_ID}.st-circle .psk-split { border-radius: 50%; }
     #${COL_ID}.st-tile .psk-split { border-radius: 8px; }
-    #${COL_ID}.st-circle .psk-split:has(.psk-more) .psk-btn, #${COL_ID}.st-tile .psk-split:has(.psk-more) .psk-btn { border-radius: inherit; }
+    #${COL_ID}.st-circle .psk-split:has(.psk-more) .psk-btn, #${COL_ID}.st-tile .psk-split:has(.psk-more) .psk-btn,
+    #${COL_ID}.st-circle .psk-split:has(.psk-trk) .psk-btn, #${COL_ID}.st-tile .psk-split:has(.psk-trk) .psk-btn { border-radius: inherit; }
+    #${COL_ID}.st-circle .psk-trk, #${COL_ID}.st-tile .psk-trk {
+      position: absolute; right: -5px; top: -5px; width: 17px; height: 17px; padding: 0;
+      border-radius: 50% !important; border: 2px solid #111; z-index: 1; background: #2a2d35; color: #8a8f99;
+    }
+    #${COL_ID}.st-circle .psk-trk.on, #${COL_ID}.st-tile .psk-trk.on { background: #e5a00d; color: #111; }
+    #${COL_ID}.st-circle .psk-trk .psk-ic, #${COL_ID}.st-tile .psk-trk .psk-ic { width: 10px; height: 10px; }
     #${COL_ID}.st-circle .psk-more, #${COL_ID}.st-tile .psk-more {
       position: absolute; right: -5px; bottom: -5px; width: 17px; height: 17px; padding: 0;
       border-radius: 50%; border: 2px solid #111; font-size: 9.5px; line-height: 1; z-index: 1;
@@ -1085,7 +1117,7 @@
       it.title = v.file;
       it.append(a, b);
       it.addEventListener('click', () => {
-        const href = fillTemplate(settings.player.template, templateVars(data, v));
+        const href = fillTemplate(settings.player.template, templateVars(data, v, true));
         closeMenu();
         if (href) openPlayerUrl(href);
       });
@@ -1099,6 +1131,38 @@
       document.addEventListener('mousedown', onOutside, true);
       document.addEventListener('keydown', onEsc, true);
     });
+  }
+
+  /* ---------- interrupteur « suivi Plex » sur le bouton IINA ---------- */
+  // Icônes Material « visibility » / « visibility_off » (Apache 2.0) : Plex voit / ne voit pas.
+  const EYE_ON = 'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z';
+  const EYE_OFF = 'M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z';
+
+  function makeTrackToggle(mainBtn) {
+    const on = settings.plexTrack;
+    const t = document.createElement('button');
+    t.className = 'psk-trk' + (on ? ' on' : '');
+    t.setAttribute('aria-pressed', on ? 'true' : 'false');
+    t.setAttribute('aria-label', 'Suivi Plex');
+    t.appendChild(svgIcon(on ? EYE_ON : EYE_OFF));
+    t.title = on
+      ? 'Suivi Plex activé : Plex enregistre ce que lit IINA (progression, reprise, vu).\nClic pour lire sans rien enregistrer.\n(Nécessite le plugin IINA « Plex Sync ».)'
+      : 'Suivi Plex désactivé : IINA lit sans rien dire à Plex.\nClic pour activer le suivi.';
+    t.style.animationDelay = mainBtn.style.animationDelay;
+    t.addEventListener('click', e => {
+      e.preventDefault(); e.stopPropagation();
+      settings.plexTrack = !settings.plexTrack;
+      saveSettings();
+      closeMenu();
+      render(currentData);
+      syncPanelTrack();
+    });
+    return t;
+  }
+
+  function syncPanelTrack() {
+    const box = document.querySelector(`#${PANEL_ID} .psk-track`);
+    if (box) box.checked = settings.plexTrack;
   }
 
   function render(data) {
@@ -1132,13 +1196,14 @@
         const many = vs.length > 1;
         const name = settings.player.name + (many && def && settings.versionPref !== 'ask' && !compact() ? ' · ' + def.short : '');
         const b = makeBtn(name, 'linear-gradient(135deg,#3a7bd5,#9b59f5)', '#fff', true, i++, 'play');
-        const href = data ? fillTemplate(settings.player.template, vars) : null;
+        const href = data ? fillTemplate(settings.player.template, templateVars(data, null, true)) : null;
         const wrap = document.createElement('div');
         wrap.className = 'psk-split';
         wrap.appendChild(b);
         if (href) {
           b.href = href;
-          setTip(b, def ? def.label : '');
+          setTip(b, [def ? def.label : '', isIina() ? (settings.plexTrack ? 'suivi Plex activé' : 'sans suivi Plex') : ''].filter(Boolean).join(' · '));
+          if (isIina()) wrap.appendChild(makeTrackToggle(b));
           // Les schémas d'app sont ouverts via un iframe jetable :
           // aucune navigation, la page Plex reste intacte.
           b.addEventListener('click', e => {
@@ -1284,6 +1349,11 @@
           <option value="ask">Demander à chaque fois</option>
         </select></div>
       <div class="psk-hint">Quand un film a plusieurs versions (4K, 1080p…), ▶ lit celle choisie ici ; la flèche ▾ à côté permet toujours d'en choisir une autre.</div>
+      <div class="psk-row"><label>Suivi Plex</label>
+        <input type="checkbox" class="psk-track"><span class="psk-hint" style="margin:0">IINA : Plex enregistre la lecture</span></div>
+      <div class="psk-hint">Progression, reprise, « En cours », marqué comme vu à la fin. Aussi sur le bouton ▶ : l'œil orange = suivi activé.
+        Nécessite le plugin IINA <b>Plex Sync</b> (<a href="https://github.com/PyroDzeus/userscripts/raw/main/iina-plex-sync.iinaplgz" target="_blank" rel="noopener" style="color:#c9cdd4">télécharger</a>, puis double-clic pour l'installer).
+        « Tester » lit toujours sans suivi.</div>
       <button class="psk-test">▶ Tester avec l'élément affiché</button>
       <div class="psk-hint">Variables : <code>{url}</code> encodée · <code>{rawurl}</code> brute · <code>{b64url}</code> base64url.</div>
 
@@ -1348,6 +1418,9 @@ disown</pre>
     vpref.value = settings.versionPref;
     logos.addEventListener('change', () => { settings.ui.logos = logos.checked; saveSettings(); render(currentData); });
     vpref.addEventListener('change', () => { settings.versionPref = vpref.value; saveSettings(); render(currentData); });
+    const track = p.querySelector('.psk-track');
+    track.checked = settings.plexTrack;
+    track.addEventListener('change', () => { settings.plexTrack = track.checked; saveSettings(); render(currentData); });
 
     scale.value = settings.ui.scale; scaleVal.textContent = settings.ui.scale + ' %';
     opac.value = settings.ui.opacity; opacVal.textContent = settings.ui.opacity + ' %';
